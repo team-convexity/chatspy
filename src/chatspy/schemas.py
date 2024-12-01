@@ -1,4 +1,4 @@
-from ninja import ModelSchema, Schema
+from ninja import Schema
 
 
 class ErrorResponse(Schema):
