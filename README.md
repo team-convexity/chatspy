@@ -15,4 +15,7 @@ pip install -e .
 
 # with dev dependencies
 pip install -e .[dev]
+
+# from remote (authenticate github first)
+pip install https://github.com/abdoulrasheed/chatspy/archive/main.zip
 ```
