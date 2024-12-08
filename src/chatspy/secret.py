@@ -14,11 +14,11 @@ class Secret:
         if settings.DEBUG:
             if private:
                 cert = os.getenv(f"{service.value}_PRI_CERT")
-                logger.wa(f"Pricert for {service.name} is not found")
+                logger.warning(f"private cert for {service.name} is not found")
                 return cert
 
             cert = os.environ.get(f"{service.value}_PUB_CERT")
-            logger.warning(f"Pubcert for {service.name} is not found")
+            logger.warning(f"public cert for {service.name} is not found")
             return cert
 
         # get cert from aws sec on staging, prod and qa.
