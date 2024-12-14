@@ -1,3 +1,5 @@
+from enum import Enum
+
 SDG_GOALS = [
     (1, "No Poverty"),
     (2, "Zero Hunger"),
@@ -286,3 +288,8 @@ COUNTRY_CHOICES = [
     ("ZM", "Zambia"),
     ("ZW", "Zimbabwe"),
 ]
+
+
+class KafkaTopic(Enum):
+    USER_CREATED="USER_CREATED"
+    USER_DELETED="ACCOUNT_DELETED"
