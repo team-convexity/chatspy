@@ -289,7 +289,3 @@ COUNTRY_CHOICES = [
     ("ZW", "Zimbabwe"),
 ]
 
-
-class KafkaTopic(Enum):
-    USER_CREATED="USER_CREATED"
-    USER_DELETED="ACCOUNT_DELETED"

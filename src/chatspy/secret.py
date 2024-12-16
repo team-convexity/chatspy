@@ -1,12 +1,10 @@
 import os
 
-import structlog
+from logging import getLogger
+from .services import Service
 from django.conf import settings
 
-from .logger import get_logger
-from .services import Service
-
-logger: structlog.BoundLogger = get_logger(__name__)
+logger = getLogger("gunicorn.info")
 
 class Secret:
     @classmethod
@@ -14,11 +12,13 @@ class Secret:
         if settings.DEBUG:
             if private:
                 cert = os.getenv(f"{service.value}_PRI_CERT")
-                logger.warning(f"private cert for {service.name} is not found")
+                if not cert:
+                    logger.warning(f"private cert for {service.name} is not found")
                 return cert
 
             cert = os.environ.get(f"{service.value}_PUB_CERT")
-            logger.warning(f"public cert for {service.name} is not found")
+            if not cert:
+                logger.warning(f"public cert for {service.name} is not found in the env")
             return cert
 
         # get cert from aws sec on staging, prod and qa.

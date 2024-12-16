@@ -4,6 +4,7 @@ from ninja.security import HttpBearer
 from django.contrib.auth import get_user_model
 
 from .secret import Secret
+from chatspy.utils import logger
 from .services import Service
 from .clients import RedisClient
 
@@ -11,11 +12,15 @@ from .clients import RedisClient
 class JWTAuth(HttpBearer):
     def authenticate(self, request, token):
         User = get_user_model()
-        key = Secret.get_service_pubkey(service=Service.AUTH)
+        key = Secret.get_service_key(service=Service.AUTH)
         
         try:
             payload = jwt.decode(token, key, algorithms=["RS256"])
             user_id = payload.get("sub")
+
+            logger.e("\n\n\nHHHHHIII")
+            logger.e(user_id)
+            logger.e("\n\n\n")
             if user_id is not None:
                 try:
                     user = User.objects.get(pk=user_id)

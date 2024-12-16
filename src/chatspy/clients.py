@@ -1,23 +1,26 @@
 import os
 import json
 import tempfile
-from enum import Enum
-from django.db import models
+import threading
+from enum import Enum, auto
 from datetime import datetime, timezone
-from django.db.models import ImageField
-from typing import Literal, Optional, Union
-from django.core.serializers import serialize
+from dataclasses import dataclass, asdict
+from typing import Literal, Optional, Union, List, Dict
 
 import redis
-import logging
 from requests import request
+from django.db import models
 from django.conf import settings
+from django.db import transaction
+from django.db.models import ImageField
+from django.core.serializers import serialize
 from redis.cluster import RedisCluster, ClusterNode
 from kafka import KafkaProducer, KafkaConsumer, errors as KafkaErrors
 
+from .utils import Logger
 from .services import Service
 
-logger = logging.getLogger("gunicorn.info")
+logger = Logger.get_logger()
 
 class KafkaEvent(Enum):
     UserCreated = "UserCreated"
@@ -43,7 +46,7 @@ class ServiceClient:
         namespace = "default"
         port = os.getenv(f"{service.name}_PORT")
         if not port:
-            logger.warning(f"cannot find port number for {service.name}")
+            logger.w(f"cannot find port number for {service.name}")
             raise Exception(f"cannot find port number for {service.name}")
 
         if settings.DEBUG:
@@ -68,6 +71,58 @@ class AccountClient(ServiceClient):
     def create_accounts(self, payload: dict):
         return self.post(endpoint="/create-account/", payload=payload)
 
+class NotificationChannel(Enum):
+    SMS = auto()
+    EMAIL = auto()
+    PUSH = auto()
+    IN_APP = auto()
+    SLACK = auto()
+
+@dataclass
+class NotificationPayload:
+    """
+    comprehensive notification payload supporting multiple channels
+    """
+
+    # recipient auth user IDs
+    recipients: List[str] # recipicients' auth user IDs
+
+    # notification content
+    # when sending SMS, the notification service will only use title (discarding body)
+    title: str
+    
+    # channel-specific configurations
+    channels: List[NotificationChannel]
+
+    # metadata and routing
+    priority: int = 3  # default priority (1-5 scale, 1 being highest)
+
+    body: Optional[str] = None
+
+    # template for rendering; Only used for Email channel
+    template_name: Optional[str] = None
+    template_context: Optional[dict] = None
+    
+    # optional advanced routing
+    expiration: Optional[datetime] = None
+    delay_until: Optional[datetime] = None
+
+    def as_dict(self) -> Dict:
+        """
+        return a dict version of the payload.
+        """
+        payload_dict = asdict(self)
+        
+        # convert channels to their values
+        payload_dict['channels'] = [channel.value for channel in self.channels]
+        
+        # handle datetime serialization
+        for date_field in ['delay_until', 'expiration']:
+            if payload_dict.get(date_field):
+                payload_dict[date_field] = payload_dict[date_field].isoformat()
+        
+        # remove None values
+        return {k: v for k, v in payload_dict.items() if v is not None}
 
 class NotificationClient(ServiceClient):
     def send_notification(
@@ -129,10 +184,10 @@ class RedisClient:
 
         try:
             self.client.ping()
-            logger.info(f"[Redis] Successfully connected to {cluster.host}")
+            logger.i(f"[Redis] Successfully connected to {cluster.host}")
         
         except redis.exceptions.ConnectionError as e:
-            logger.error(f"[Redis] Cannot establish connection to Redis: {e}")
+            logger.e(f"[Redis] Cannot establish connection to Redis: {e}")
             raise
 
     def set(self, key: str, value: Union[str, int, float], expire: Optional[int] = None) -> bool:
@@ -145,11 +200,12 @@ class RedisClient:
         :return: Boolean indicating success
         """
         try:
+            value = json.dumps(value)
             if expire:
                 return self.client.setex(key, expire, value)
-            return self.client.set(key, value)
+            return self.client.json(key, value)
         except Exception as e:
-            logger.info(f"Error setting key {key}: {e}")
+            logger.i(f"Error setting key {key}: {e}")
             return False
 
     def get(self, key: str) -> Optional[str]:
@@ -162,7 +218,7 @@ class RedisClient:
         try:
             return self.client.get(key)
         except Exception as e:
-            logger.info(f"Error getting key {key}: {e}")
+            logger.i(f"Error getting key {key}: {e}")
             return None
 
     def delete(self, key: str) -> int:
@@ -175,9 +231,32 @@ class RedisClient:
         try:
             return self.client.delete(key)
         except Exception as e:
-            logger.info(f"Error deleting key {key}: {e}")
+            logger.i(f"Error deleting key {key}: {e}")
             return 0
 
+class SafeConsumer(KafkaConsumer):
+    def __init__(self, *topics, message_handler=None, **kwargs):
+        super().__init__(*topics, **kwargs)
+        assert message_handler is not None, "message_handler cannot be None"
+        self.message_handler = message_handler
+
+    def consume_messages(self):
+        logger.i("[Kafka] Consumer Listeners: Active")
+        for message in self:
+            self._safe_process(message)
+
+    def _safe_process(self, message):
+        try:
+            with transaction.atomic():
+                self.message_handler(message)
+                # commit offset only after successful processing
+                self.commit()
+        except IntegrityError:
+            logger.w(f"[SafeConsumer] Duplicate message: {message.key}")
+            self.commit()
+        except Exception as e:
+            logger.e(f"[SafeConsumer] Message processing error: {e}")
+            self.seek_to_current()
 
 class KafkaClient:
     def __init__(self, bootstrap_servers):
@@ -242,7 +321,7 @@ class KafkaClient:
         """
         Cleanup temporary files on object destruction.
         """
-        logger.info("[Kafka] Cleaning temp files...")
+        logger.i("[Kafka] Cleaning temp files...")
 
         try:
             with open('temp_files_log.txt', 'r') as log_file:
@@ -251,12 +330,12 @@ class KafkaClient:
             for file in files_to_delete:
                 try:
                     os.unlink(file)
-                    logger.info(f"[Kafka] Successfully cleaned: {file}")
+                    logger.i(f"[Kafka] Successfully cleaned: {file}")
                 except OSError as e:
-                    logger.warning(f"[Kafka] Failed to delete temporary file {file}: {e}")
+                    logger.w(f"[Kafka] Failed to delete temporary file {file}: {e}")
         
         except FileNotFoundError as e:
-            logger.warning(f"[Kafka] Error: temp_files_log.json not found: {e}")
+            logger.w(f"[Kafka] Error: temp_files_log.json not found: {e}")
 
     def json_serializer(self, v):
         """
@@ -293,23 +372,57 @@ class KafkaClient:
                 key_serializer=lambda k: str(k).encode('utf-8'),
                 value_serializer=lambda v: self.json_serializer(v).encode("utf-8")
             )
-            logger.info("[Kafka] Producer created successfully.")
+            logger.i("[Kafka] Producer created successfully.")
             return self._producer
             
         except KafkaErrors.NoBrokersAvailable as e:
-            logger.error(f"No brokers available: {e}")
+            logger.e(f"No brokers available: {e}")
             raise
         
         except Exception as e:
-            logger.error(f"Failed to create Kafka Producer: {e}")
+            logger.e(f"Failed to create Kafka Producer: {e}")
             raise
 
-    def create_consumer(self, topics, group_id, auto_offset_reset="latest"):
+    def create_consumer(self, topics, group_id, message_handler, auto_offset_reset="latest") -> SafeConsumer | None:
         try:
             consumer_config = {**self.common_config, "group_id": group_id, "auto_offset_reset": auto_offset_reset}
-            self._consumer = KafkaConsumer(*topics, **consumer_config)
-            logger.info(f"Kafka Consumer created for topics: {topics}")
+            self._consumer = SafeConsumer(*topics, message_handler=message_handler, **consumer_config)
+            logger.i(f"Kafka Consumer created for topics: {topics}")
             return self._consumer
         except Exception as e:
-            logger.error(f"Failed to create Kafka Consumer: {e}")
+            logger.e(f"Failed to create Kafka Consumer: {e}")
             raise
+
+class Services:
+    clients = {}
+
+    @classmethod
+    def initialize_clients(cls, kafka_topics: list[KafkaEvent] | None = None, group_id: str = None, message_handler = None):
+        """
+        Args:
+            kafka_topics (list[KafkaEvent] | None, optional): A list of topics to consume. Defaults to None.
+        """
+
+        cls.clients["redis"] = RedisClient(
+            startup_nodes=[
+                ClusterNode(os.getenv("REDIS_CLUSTER_A_STRING"), 10397),
+            ],
+            password=os.getenv("REDIS_PASSWORD"),
+        )
+        cls.clients["kafka"] = KafkaClient(bootstrap_servers=os.getenv("KAFKA_SERVICE_URI"))
+        cls.clients["producer"] = cls.clients["kafka"].create_producer()
+        cls.clients["account"] = AccountClient(service=Service.ACCOUNT)
+
+        if kafka_topics:
+            consumer = cls.clients["kafka"].create_consumer(
+                group_id=group_id,
+                topics=kafka_topics,
+                message_handler=message_handler
+            )
+
+            consumer_thread = threading.Thread(target=consumer.consume_messages)
+            consumer_thread.start()
+    
+    @classmethod
+    def get_client(cls, name: Literal["kafka", "producer", "account", "redis"]):
+        return cls.clients.get(name)

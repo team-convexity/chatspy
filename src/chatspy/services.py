@@ -6,3 +6,4 @@ class Service(Enum):
     PROJECT = "PROJECT"
     WALLET = "WALLET"
     ACCOUNT = "ACCOUNT"
+    NOTIFICATION = "NOTIFICATION"
