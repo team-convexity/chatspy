@@ -251,12 +251,10 @@ class SafeConsumer(KafkaConsumer):
                 self.message_handler(message)
                 # commit offset only after successful processing
                 self.commit()
-        except IntegrityError:
-            logger.w(f"[SafeConsumer] Duplicate message: {message.key}")
-            self.commit()
         except Exception as e:
             logger.e(f"[SafeConsumer] Message processing error: {e}")
-            self.seek_to_current()
+            # self.seek() # seek_to_current
+            # self.commit()
 
 class KafkaClient:
     def __init__(self, bootstrap_servers):
