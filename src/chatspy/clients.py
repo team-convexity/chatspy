@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import tempfile
 import threading
@@ -401,6 +402,11 @@ class Services:
             kafka_topics (list[KafkaEvent] | None, optional): A list of topics to consume. Defaults to None.
         """
 
+        command = sys.argv[1] if len(sys.argv) > 1 else None
+        if command in ['migrate', 'makemigrations']:
+            # skip initialization of clients when running migrations
+            return
+        
         cls.clients["redis"] = RedisClient(
             startup_nodes=[
                 ClusterNode(os.getenv("REDIS_CLUSTER_A_STRING"), 10397),
