@@ -403,8 +403,22 @@ class Services:
         """
 
         command = sys.argv[1] if len(sys.argv) > 1 else None
-        if command in ['migrate', 'makemigrations']:
-            # skip initialization of clients when running migrations
+        # skip initialization of clients when running migrations
+        if command in [
+            'migrate',
+            'makemigrations',
+            'showmigrations',
+            'sqlmigrate',
+            'dbshell',
+            'dumpdata',
+            'loaddata',
+            'flush',
+            'shell',
+            'check',
+            'test',
+            'inspectdb',
+            'compilemessages'
+            ]:
             return
         
         cls.clients["redis"] = RedisClient(
