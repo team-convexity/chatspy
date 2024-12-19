@@ -23,8 +23,8 @@ dev = [
     "ruff>=0.1.6"
 ]
 
-[tool.setuptools]
-packages = ["chatspy"]
+[tool.hatch.build.targets.wheel]
+packages = ["src/chatspy"]
 
 [tool.ruff]
 line-length = 120
