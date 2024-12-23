@@ -4,6 +4,7 @@ import json
 import tempfile
 import threading
 from enum import Enum, auto
+from collections import defaultdict
 from datetime import datetime, timezone
 from dataclasses import dataclass, asdict
 from typing import Literal, Optional, Union, List, Dict
@@ -257,6 +258,88 @@ class SafeConsumer(KafkaConsumer):
             # self.seek() # seek_to_current
             # self.commit()
 
+class BufferedProducer(KafkaProducer):
+    """
+    BufferedProducer is a subclass of KafkaProducer that buffers events before dispatching them to Kafka.
+    
+    Each entry contains a "leader" event and a list of "follower" events.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+         # buffer per record key
+        self.event_buffer = defaultdict(lambda: {"leader": None, "followers": []})
+
+    def add_buffer(self, key: str, value: dict, topic: str, leader: bool = False):
+        """
+        Add an event to the buffer.
+
+        :param leader (boolean): Whether this is the leader event.
+        :param key: The partition key (e.g., user_id).
+        :param value: The event payload (dict).
+        :param topic: The Kafka topic associated with the event.
+        """
+        if key not in self.event_buffer:
+            self.event_buffer[key] = {"leader": None, "followers": []}
+
+        event = {
+            "key": key,
+            "value": value,
+            "topic": topic,
+        }
+
+        if leader:
+            if self.event_buffer[key]["leader"] is not None:
+                raise ValueError(f"A leader event is already buffered for key: {key}")
+            self.event_buffer[key]["leader"] = event
+            return
+        
+        self.event_buffer[key]["followers"].append(event)
+
+    def dispatch_buffers(self, key):
+        """
+        Dispatch buffered events for a specific key.
+
+        :param key: The partition key (e.g., user_id).
+        """
+        buffer = self.event_buffer[key]
+
+        # dispatch leader event first
+        if buffer["leader"]:
+            essential_event = buffer["leader"]
+            self.send(
+                essential_event["topic"],
+                key=essential_event["key"],
+                value=essential_event["value"]
+            )
+
+            # ensure the leader event is sent
+            self.flush()
+            # clear leader event after dispatch
+            buffer["leader"] = None
+
+        # dispatch non-leader events
+        for event in buffer["followers"]:
+            self.send(
+                event["topic"],
+                key=event["key"],
+                value=event["value"]
+            )
+         # ensure all events are sent
+        self.flush()
+
+        # clear the buffer for this key
+        del self.event_buffer[key]
+
+    def clear_buffer(self, key):
+        """
+        clear the buffer for a specific key without dispatching events.
+
+        :param key: the partition key (e.g., user_id).
+        """
+        if key in self.event_buffer:
+            del self.event_buffer[key]
+
 class KafkaClient:
     def __init__(self, bootstrap_servers):
         """
@@ -362,24 +445,34 @@ class KafkaClient:
         result = json.dumps(result, default=str)
         return result if result is not None else None
 
-    def create_producer(self):
+    def create_producer(self, bufferd_producer: bool=False) -> KafkaProducer | BufferedProducer:
         try:
-            self._producer = KafkaProducer(
-                **self.common_config,
-                api_version=(0,11,5),
-                compression_type='gzip',
-                key_serializer=lambda k: str(k).encode('utf-8'),
-                value_serializer=lambda v: self.json_serializer(v).encode("utf-8")
-            )
+            if bufferd_producer:
+                self._producer = BufferedProducer(
+                    **self.common_config,
+                    api_version=(0,11,5),
+                    compression_type='gzip',
+                    key_serializer=lambda k: str(k).encode('utf-8'),
+                    value_serializer=lambda v: self.json_serializer(v).encode("utf-8")
+                )
+            else:
+                self._producer = KafkaProducer(
+                    **self.common_config,
+                    api_version=(0,11,5),
+                    compression_type='gzip',
+                    key_serializer=lambda k: str(k).encode('utf-8'),
+                    value_serializer=lambda v: self.json_serializer(v).encode("utf-8")
+                )
+
             logger.i("[Kafka] Producer created successfully.")
             return self._producer
             
         except KafkaErrors.NoBrokersAvailable as e:
-            logger.e(f"No brokers available: {e}")
+            logger.e(f"[Kafka] No brokers available: {e}")
             raise
         
         except Exception as e:
-            logger.e(f"Failed to create Kafka Producer: {e}")
+            logger.e(f"[Kafka] Failed to create Kafka Producer: {e}")
             raise
 
     def create_consumer(self, topics, group_id, message_handler, auto_offset_reset="latest") -> SafeConsumer | None:
@@ -394,16 +487,23 @@ class KafkaClient:
 
 class Services:
     clients = {}
-
+    
     @classmethod
-    def initialize_clients(cls, kafka_topics: list[KafkaEvent] | None = None, group_id: str = None, message_handler = None):
+    def initialize_clients(cls, kafka_topics: list[KafkaEvent] | None = None, group_id: str = None, message_handler = None, bufferd_producer=False):
         """
         Args:
             kafka_topics (list[KafkaEvent] | None, optional): A list of topics to consume. Defaults to None.
         """
+        if len(sys.argv) > 1:
+            if 'celery' in sys.argv[0]:
+                # return if running celery
+                return
+            
+            command = sys.argv[1]
 
-        command = sys.argv[1] if len(sys.argv) > 1 else None
-        # skip initialization of clients when running migrations
+        else:
+            command = None
+
         if command in [
             'migrate',
             'makemigrations',
@@ -419,6 +519,7 @@ class Services:
             'inspectdb',
             'compilemessages'
             ]:
+            # skip initialization of clients when running manage.py commands
             return
         
         cls.clients["redis"] = RedisClient(
@@ -428,7 +529,7 @@ class Services:
             password=os.getenv("REDIS_PASSWORD"),
         )
         cls.clients["kafka"] = KafkaClient(bootstrap_servers=os.getenv("KAFKA_SERVICE_URI"))
-        cls.clients["producer"] = cls.clients["kafka"].create_producer()
+        cls.clients["producer"] = cls.clients["kafka"].create_producer(bufferd_producer=bufferd_producer)
         cls.clients["account"] = AccountClient(service=Service.ACCOUNT)
 
         if kafka_topics:
