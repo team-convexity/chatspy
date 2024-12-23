@@ -7,4 +7,6 @@ class Service(Enum):
     WALLET = "WALLET"
     ACCOUNT = "ACCOUNT"
     NOTIFICATION = "NOTIFICATION"
-    FIELDS = "FIELDS"
+    FIELDS = "FIELDS" # for field service
+
+
