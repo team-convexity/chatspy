@@ -375,7 +375,7 @@ class KafkaClient:
 
         }
         # write temp file names/dir to a text file for clean up later.
-        with open('temp_files_log.txt', 'w') as log_file:
+        with open('/tmp/chats-events-log.txt', 'w') as log_file:
             json.dump(self.temp_files, log_file, indent=4)
 
         self._producer = None
@@ -406,7 +406,7 @@ class KafkaClient:
         logger.i("[Kafka] Cleaning temp files...")
 
         try:
-            with open('temp_files_log.txt', 'r') as log_file:
+            with open('/tmp/chats-events-log.txt', 'r') as log_file:
                 files_to_delete = json.loads(log_file.read())
 
             for file in files_to_delete:
