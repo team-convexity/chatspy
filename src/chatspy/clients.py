@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import codecs
 import tempfile
 import threading
 from enum import Enum, auto
@@ -393,7 +394,8 @@ class KafkaClient:
         - str: Path to the temporary file.
         """
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=f".{suffix}")
-        temp_file.write(content.encode("utf-8"))
+        # convert escaped newlines (\\n) into actual newlines before writing to file. Fargate escapes newlines in environment variables.
+        temp_file.write(codecs.escape_decode(content.encode("utf-8"))[0])
         temp_file.close()
         self.temp_files.append(temp_file.name)
         return temp_file.name
