@@ -3,7 +3,6 @@ import codecs
 
 from logging import getLogger
 from .services import Service
-from django.conf import settings
 
 logger = getLogger("gunicorn.info")
 
