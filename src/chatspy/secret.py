@@ -16,7 +16,7 @@ class Secret:
                 logger.warning(f"private cert for {service.name} is not found")
             return codecs.escape_decode(cert.encode("utf-8"))[0]
         
-        cert = os.environ.get(f"{service.value}_PUB_CERT")
+        cert = os.getenv(f"{service.value}_PUB_CERT")
         if not cert:
             logger.warning(f"public cert for {service.name} is not found in the env")
         
