@@ -510,6 +510,7 @@ class Services:
             'migrate',
             'makemigrations',
             'showmigrations',
+            'collectstatic',
             'sqlmigrate',
             'dbshell',
             'dumpdata',
