@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import codecs
+import logging
 import tempfile
 import threading
 from enum import Enum, auto
@@ -496,6 +497,7 @@ class Services:
         Args:
             kafka_topics (list[KafkaEvent] | None, optional): A list of topics to consume. Defaults to None.
         """
+        logging.getLogger('kafka').setLevel(logging.WARN)
         if len(sys.argv) > 1:
             if 'celery' in sys.argv[0]:
                 # return if running celery
