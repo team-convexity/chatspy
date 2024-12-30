@@ -33,18 +33,18 @@ class BaseAuthMiddleware:
             
             return False, ({"success": False, "data": "User does not exists"}, 401)
         except jwt.DecodeError as e:
-            logger.e(f"Cannot decode JWT token ({token}): {e}")
+            logger.e(f"Cannot decode JWT token ({token}): {e}", service=Service.AUTH.value, description=f"Invalid Token: {token}")
             return False, ({"success": False, "error": {"message": "Invalid Token"}}, 401)
         
         except jwt.ExpiredSignatureError as e:
             return False, ({"success": False, "error": {"message": "Token has expired"}}, 401)
         
         except ObjectDoesNotExist as e:
-            logger.e(f"Auth UserProfile not found: {e}")
+            logger.e(f"Auth UserProfile not found: {e}", service=Service.AUTH.value, description=f"Profile not found: {token}")
             return False, ({"success": False, "error": {"message": "Invalid Token"}}, 401)
         
         except Exception as e:
-            logger.e(f"[AuthenticationMiddleware]: {e}")
+            logger.e(f"[AuthenticationMiddleware]: {e}", service=Service.AUTH.value, description=f"An error occured: {token}")
             return False, ({"success": False, "error": {"message": "An error occured"}}, 500)
 
 
