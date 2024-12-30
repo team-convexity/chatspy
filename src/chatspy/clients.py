@@ -529,7 +529,7 @@ class Services:
         
         cls.clients["redis"] = RedisClient(
             startup_nodes=[
-                ClusterNode(os.getenv("REDIS_CLUSTER_A_STRING"), 10397),
+                ClusterNode(os.getenv("REDIS_CLUSTER_A_STRING"), os.getenv("REDIS_CLUSTER_A_PORT", 10397)),
             ],
             password=os.getenv("REDIS_PASSWORD"),
         )
