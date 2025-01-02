@@ -1,3 +1,4 @@
+import os
 import jwt
 
 from django.apps import apps
@@ -26,8 +27,14 @@ class BaseAuthMiddleware:
             )
             user_id = payload.get("sub")
             if user_id is not None:
-                UserProfile = apps.get_model("core.UserProfile", require_ready=False)
-                user = UserProfile.objects.get(auth_user_id=ChatsRecord.from_global_id(user_id)[1])
+                # if we are in auth service, user is the real django User model.
+                if 'authy' not in os.getenv("DJANGO_SETTINGS_MODULE", ""):
+                    UserProfile = apps.get_model("core.UserProfile", require_ready=False)
+                    user = UserProfile.objects.get(auth_user_id=ChatsRecord.from_global_id(user_id)[1])
+                else:
+                    User = apps.get_model("core.User", require_ready=False)
+                    user = User.objects.get(id=ChatsRecord.from_global_id(user_id)[1])
+
                 logger.i(f"Successfully authenticated {user}")
                 return True, user
             
