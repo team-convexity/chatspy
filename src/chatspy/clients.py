@@ -12,6 +12,7 @@ from dataclasses import dataclass, asdict
 from typing import Literal, Optional, Union, List, Dict
 
 import redis
+from web3 import Web3
 from requests import request
 from django.db import models
 from django.conf import settings
@@ -26,11 +27,13 @@ from .services import Service
 
 logger = Logger.get_logger()
 
+
 class KafkaEvent(Enum):
     UserCreated = "UserCreated"
     ProjectCreated = "ProjectCreated"
     SendNotification = "SendNotification"
     OrganizationCreated = "OrganizationCreated"
+
 
 class ServiceClient:
     def __init__(self, service: Service):
@@ -75,12 +78,14 @@ class AccountClient(ServiceClient):
     def create_accounts(self, payload: dict):
         return self.post(endpoint="/create-account/", payload=payload)
 
+
 class NotificationChannel(Enum):
     SMS = auto()
     EMAIL = auto()
     PUSH = auto()
     IN_APP = auto()
     SLACK = auto()
+
 
 @dataclass
 class NotificationPayload:
@@ -89,12 +94,12 @@ class NotificationPayload:
     """
 
     # recipient auth user IDs
-    recipients: List[str] # recipicients' auth user IDs
+    recipients: List[str]  # recipicients' auth user IDs
 
     # notification content
     # when sending SMS, the notification service will only use title (discarding body)
     title: str
-    
+
     # channel-specific configurations
     channels: List[NotificationChannel]
 
@@ -106,7 +111,7 @@ class NotificationPayload:
     # template for rendering; Only used for Email channel
     template_name: Optional[str] = None
     template_context: Optional[dict] = None
-    
+
     # optional advanced routing
     expiration: Optional[datetime] = None
     delay_until: Optional[datetime] = None
@@ -116,17 +121,18 @@ class NotificationPayload:
         return a dict version of the payload.
         """
         payload_dict = asdict(self)
-        
+
         # convert channels to their values
-        payload_dict['channels'] = [channel.value for channel in self.channels]
-        
+        payload_dict["channels"] = [channel.value for channel in self.channels]
+
         # handle datetime serialization
-        for date_field in ['delay_until', 'expiration']:
+        for date_field in ["delay_until", "expiration"]:
             if payload_dict.get(date_field):
                 payload_dict[date_field] = payload_dict[date_field].isoformat()
-        
+
         # remove None values
         return {k: v for k, v in payload_dict.items() if v is not None}
+
 
 class NotificationClient(ServiceClient):
     def send_notification(
@@ -164,7 +170,14 @@ class RedisClient:
     Base class for Redis Cluster connection
     """
 
-    def __init__(self, startup_nodes: list[ClusterNode], decode_responses: bool = True, skip_full_coverage_check: bool = True, password=None, cluster_enabled=False):
+    def __init__(
+        self,
+        startup_nodes: list[ClusterNode],
+        decode_responses: bool = True,
+        skip_full_coverage_check: bool = True,
+        password=None,
+        cluster_enabled=False,
+    ):
         """
         Initialize Redis Cluster connection
 
@@ -174,7 +187,7 @@ class RedisClient:
         :password: password
         :cluster_enabled: whether we are connecting as a cluster or not
         """
-        
+
         if cluster_enabled:
             self.client = RedisCluster(
                 password=password,
@@ -182,14 +195,14 @@ class RedisClient:
                 decode_responses=decode_responses,
                 skip_full_coverage_check=skip_full_coverage_check,
             )
-        
+
         cluster = startup_nodes[0]
         self.client = redis.Redis(host=cluster.host, port=cluster.port, password=password, db=0)
 
         try:
             self.client.ping()
             logger.i(f"[Redis] Successfully connected to {cluster.host}")
-        
+
         except redis.exceptions.ConnectionError as e:
             logger.e(f"[Redis] Cannot establish connection to Redis: {e}")
             raise
@@ -238,6 +251,7 @@ class RedisClient:
             logger.i(f"Error deleting key {key}: {e}")
             return 0
 
+
 class SafeConsumer(KafkaConsumer):
     def __init__(self, *topics, message_handler=None, **kwargs):
         super().__init__(*topics, **kwargs)
@@ -260,16 +274,17 @@ class SafeConsumer(KafkaConsumer):
             # self.seek() # seek_to_current
             # self.commit()
 
+
 class BufferedProducer(KafkaProducer):
     """
     BufferedProducer is a subclass of KafkaProducer that buffers events before dispatching them to Kafka.
-    
+
     Each entry contains a "leader" event and a list of "follower" events.
     """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-         # buffer per record key
+        # buffer per record key
         self.event_buffer = defaultdict(lambda: {"leader": None, "followers": []})
 
     def add_buffer(self, key: str, value: dict, topic: str, leader: bool = False):
@@ -295,7 +310,7 @@ class BufferedProducer(KafkaProducer):
                 raise ValueError(f"A leader event is already buffered for key: {key}")
             self.event_buffer[key]["leader"] = event
             return
-        
+
         self.event_buffer[key]["followers"].append(event)
 
     def dispatch_buffers(self, key):
@@ -309,11 +324,7 @@ class BufferedProducer(KafkaProducer):
         # dispatch leader event first
         if buffer["leader"]:
             essential_event = buffer["leader"]
-            self.send(
-                essential_event["topic"],
-                key=essential_event["key"],
-                value=essential_event["value"]
-            )
+            self.send(essential_event["topic"], key=essential_event["key"], value=essential_event["value"])
 
             # ensure the leader event is sent
             self.flush()
@@ -322,12 +333,8 @@ class BufferedProducer(KafkaProducer):
 
         # dispatch non-leader events
         for event in buffer["followers"]:
-            self.send(
-                event["topic"],
-                key=event["key"],
-                value=event["value"]
-            )
-         # ensure all events are sent
+            self.send(event["topic"], key=event["key"], value=event["value"])
+        # ensure all events are sent
         self.flush()
 
         # clear the buffer for this key
@@ -341,6 +348,7 @@ class BufferedProducer(KafkaProducer):
         """
         if key in self.event_buffer:
             del self.event_buffer[key]
+
 
 class KafkaClient:
     def __init__(self, bootstrap_servers):
@@ -358,7 +366,9 @@ class KafkaClient:
         password = os.getenv("KAFKA_AUTH_PASSWORD")
 
         if not access_key or not access_cert or not ca_cert:
-            raise ValueError("[Kafka] Certificate strings must be set in environment variables: ACCESS_KEY, ACCESS_CERT, CA_CERT")
+            raise ValueError(
+                "[Kafka] Certificate strings must be set in environment variables: ACCESS_KEY, ACCESS_CERT, CA_CERT"
+            )
 
         # write the certificate strings to temporary files
         self.temp_files = []
@@ -374,15 +384,14 @@ class KafkaClient:
             "ssl_keyfile": ssl_keyfile,
             "ssl_certfile": ssl_certfile,
             "bootstrap_servers": bootstrap_servers,
-
         }
         # write temp file names/dir to a text file for clean up later.
-        with open('/tmp/chats-events-log.txt', 'w') as log_file:
+        with open("/tmp/chats-events-log.txt", "w") as log_file:
             json.dump(self.temp_files, log_file, indent=4)
 
         self._producer = None
         self._consumer = None
-        
+
     def _write_to_temp_file(self, content, suffix):
         """
         Write content to a temporary file and return the file path.
@@ -400,7 +409,7 @@ class KafkaClient:
         temp_file.close()
         self.temp_files.append(temp_file.name)
         return temp_file.name
-    
+
     @staticmethod
     def cleanup():
         """
@@ -409,7 +418,7 @@ class KafkaClient:
         logger.i("[Kafka] Cleaning temp files...")
 
         try:
-            with open('/tmp/chats-events-log.txt', 'r') as log_file:
+            with open("/tmp/chats-events-log.txt", "r") as log_file:
                 files_to_delete = json.loads(log_file.read())
 
             for file in files_to_delete:
@@ -418,7 +427,7 @@ class KafkaClient:
                     logger.i(f"[Kafka] Successfully cleaned: {file}")
                 except OSError as e:
                     logger.w(f"[Kafka] Failed to delete temporary file {file}: {e}")
-        
+
         except FileNotFoundError as e:
             logger.w(f"[Kafka] Error: temp_files_log.json not found: {e}")
 
@@ -426,7 +435,7 @@ class KafkaClient:
         """
         serializer for various field types and other objects.
         """
-        
+
         match v:
             case datetime():
                 result = v.isoformat()
@@ -437,43 +446,43 @@ class KafkaClient:
             case timezone():
                 result = str(v)
             case models.Model():
-                result = serialize('json', [v])
-            case (list() | tuple()) if all(isinstance(item, models.Model) for item in v):
-                result = serialize('json', v)
+                result = serialize("json", [v])
+            case list() | tuple() if all(isinstance(item, models.Model) for item in v):
+                result = serialize("json", v)
             case dict():
                 result = {key: self.json_serializer(value) for key, value in v.items()}
             case _:
                 result = json.dumps(v, default=str)
-        
+
         result = json.dumps(result, default=str)
         return result if result is not None else None
 
-    def create_producer(self, bufferd_producer: bool=False) -> KafkaProducer | BufferedProducer:
+    def create_producer(self, bufferd_producer: bool = False) -> KafkaProducer | BufferedProducer:
         try:
             if bufferd_producer:
                 self._producer = BufferedProducer(
                     **self.common_config,
-                    api_version=(0,11,5),
-                    compression_type='gzip',
-                    key_serializer=lambda k: str(k).encode('utf-8'),
-                    value_serializer=lambda v: self.json_serializer(v).encode("utf-8")
+                    api_version=(0, 11, 5),
+                    compression_type="gzip",
+                    key_serializer=lambda k: str(k).encode("utf-8"),
+                    value_serializer=lambda v: self.json_serializer(v).encode("utf-8"),
                 )
             else:
                 self._producer = KafkaProducer(
                     **self.common_config,
-                    api_version=(0,11,5),
-                    compression_type='gzip',
-                    key_serializer=lambda k: str(k).encode('utf-8'),
-                    value_serializer=lambda v: self.json_serializer(v).encode("utf-8")
+                    api_version=(0, 11, 5),
+                    compression_type="gzip",
+                    key_serializer=lambda k: str(k).encode("utf-8"),
+                    value_serializer=lambda v: self.json_serializer(v).encode("utf-8"),
                 )
 
             logger.i("[Kafka] Producer created successfully.")
             return self._producer
-            
+
         except KafkaErrors.NoBrokersAvailable as e:
             logger.e(f"[Kafka] No brokers available: {e}")
             raise
-        
+
         except Exception as e:
             logger.e(f"[Kafka] Failed to create Kafka Producer: {e}")
             raise
@@ -488,45 +497,52 @@ class KafkaClient:
             logger.e(f"Failed to create Kafka Consumer: {e}")
             raise
 
+
 class Services:
     clients = {}
-    
+
     @classmethod
-    def initialize_clients(cls, kafka_topics: list[KafkaEvent] | None = None, group_id: str = None, message_handler = None, bufferd_producer=False):
+    def initialize_clients(
+        cls,
+        kafka_topics: list[KafkaEvent] | None = None,
+        group_id: str = None,
+        message_handler=None,
+        bufferd_producer=False,
+    ):
         """
         Args:
             kafka_topics (list[KafkaEvent] | None, optional): A list of topics to consume. Defaults to None.
         """
-        logging.getLogger('kafka').setLevel(logging.WARN)
+        logging.getLogger("kafka").setLevel(logging.WARN)
         if len(sys.argv) > 1:
-            if 'celery' in sys.argv[0]:
+            if "celery" in sys.argv[0]:
                 # return if running celery
                 return
-            
+
             command = sys.argv[1]
 
         else:
             command = None
 
         if command in [
-            'migrate',
-            'makemigrations',
-            'showmigrations',
-            'collectstatic',
-            'sqlmigrate',
-            'dbshell',
-            'dumpdata',
-            'loaddata',
-            'flush',
-            'shell',
-            'check',
-            'test',
-            'inspectdb',
-            'compilemessages'
-            ]:
+            "migrate",
+            "makemigrations",
+            "showmigrations",
+            "collectstatic",
+            "sqlmigrate",
+            "dbshell",
+            "dumpdata",
+            "loaddata",
+            "flush",
+            "shell",
+            "check",
+            "test",
+            "inspectdb",
+            "compilemessages",
+        ]:
             # skip initialization of clients when running manage.py commands
             return
-        
+
         cls.clients["redis"] = RedisClient(
             startup_nodes=[
                 ClusterNode(os.getenv("REDIS_CLUSTER_A_STRING"), os.getenv("REDIS_CLUSTER_A_PORT", 10397)),
@@ -539,14 +555,55 @@ class Services:
 
         if kafka_topics:
             consumer = cls.clients["kafka"].create_consumer(
-                group_id=group_id,
-                topics=kafka_topics,
-                message_handler=message_handler
+                group_id=group_id, topics=kafka_topics, message_handler=message_handler
             )
 
             consumer_thread = threading.Thread(target=consumer.consume_messages)
             consumer_thread.start()
-    
+
     @classmethod
     def get_client(cls, name: Literal["kafka", "producer", "account", "redis"]):
         return cls.clients.get(name)
+
+
+class Contract:
+    def __init__(self):
+        address = os.getenv("CONTRACT_ADDRESS")
+        abi = os.getenv("CONTRACT_ABI")
+        self.instance = w3.eth.contract(address=address, abi=abi)
+
+    def get_address(self, *kwargs):
+        self.instance.functions.getAddress(**kwargs).call()
+
+    def transfer(self, **kwargs):
+        self.instance.functions.getDeployedProjects(**kwargs).call()
+
+    def withdraw(self, **kwargs):
+        """Withdraw funds from the project"""
+        self.instance.functions.withdraw(**kwargs).call()
+
+
+class FactoryContract(Contract):
+    def create_organization(self, **kwargs):
+        self.instance.functions.createOrganization(**kwargs).call()
+
+    def deploy_project(self, **kwargs):
+        self.instance.functions.createProject(**kwargs).call()
+
+
+class ProjectContract(Contract):
+    def claim(self, **kwargs):
+        """Vendor to claim funds"""
+        self.instance.functions.claimFunds(**kwargs).call()
+
+    def add_vendor(self, **kwargs):
+        """Add vendor to the project"""
+        self.instance.functions.registerVendor(**kwargs).call()
+
+    def remove_vendor(self, **kwargs):
+        """Remove vendor from the project"""
+        self.instance.functions.deregisterVendor(**kwargs).call()
+
+    def update_max_spend_limit(self, **kwargs):
+        """Update the maximum spend limit"""
+        self.instance.functions.updateMaxSpendingLimit(**kwargs).call()
