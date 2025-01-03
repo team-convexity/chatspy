@@ -27,6 +27,7 @@ class BaseAuthMiddleware:
             )
             user_id = payload.get("sub")
             if user_id is not None:
+                
                 # if we are in auth service, user is the real django User model.
                 if 'authy' not in os.getenv("DJANGO_SETTINGS_MODULE", ""):
                     UserProfile = apps.get_model("core.UserProfile", require_ready=False)
@@ -34,7 +35,7 @@ class BaseAuthMiddleware:
                 else:
                     User = apps.get_model("core.User", require_ready=False)
                     user = User.objects.get(id=ChatsRecord.from_global_id(user_id)[1])
-
+                    
                 logger.i(f"Successfully authenticated {user}")
                 return True, user
             
@@ -62,12 +63,15 @@ class AuthenticationMiddleware(BaseAuthMiddleware):
     def __call__(self, request: HttpRequest):
         authorization = request.headers.get("Authorization", None)
         if not authorization:
-            response = self.get_response(request)
-            return response
+            return self.get_response(request)
         
-        auth_type, token = authorization.split(" ")
+        try:
+            auth_type, token = authorization.split(" ")
+        except ValueError:
+            return Response({"success": False, "error": {"message": "Invalid authorization header"}}, status=401)
+        
         if auth_type.lower() != "bearer":
-            return Response("Unsupported authorization type", status=400)
+            return Response({"success": False, "error": {"message": "Invalid authorization type"}}, status=401)
         
         authenticated, user_or_error_response = self.get_user_from_token(token)
         if authenticated:
