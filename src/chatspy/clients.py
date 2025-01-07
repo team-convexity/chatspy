@@ -569,13 +569,10 @@ class Services:
 
 
 class Contract:
-    def __init__(self):
-        address = os.getenv("CONTRACT_ADDRESS")
-        abi = os.getenv("CONTRACT_ABI")
-
+    def __init__(self, contract_address=None, contract_abi=None):
         self.w3 = Web3()
-        if all([abi, address]):
-            self.instance = self.w3.eth.contract(address=address, abi=abi)
+        if all([contract_abi, contract_address]):
+            self.instance = self.w3.eth.contract(address=contract_address, abi=contract_abi)
         
         else:
             logger.w(
