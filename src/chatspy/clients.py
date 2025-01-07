@@ -572,8 +572,17 @@ class Contract:
     def __init__(self):
         address = os.getenv("CONTRACT_ADDRESS")
         abi = os.getenv("CONTRACT_ABI")
+
         self.w3 = Web3()
-        self.instance = self.w3.eth.contract(address=address, abi=abi)
+        if all([abi, address]):
+            self.instance = self.w3.eth.contract(address=address, abi=abi)
+        
+        else:
+            logger.w(
+                "[Contract Init]: No ABI or Contract address found in the env",
+                service=Service.AUTH.value,
+                description="[Contract Init]: No ABI or Contract address found in the env",
+            )
         self.kms_client = boto3.client("kms", region_name="us-east-2")
 
     def generate_wallet(self):
