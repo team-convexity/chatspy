@@ -12,12 +12,14 @@ from dataclasses import dataclass, asdict
 from typing import Literal, Optional, Union, List, Dict
 
 import redis
+import boto3
 from web3 import Web3
 from requests import request
 from django.db import models
 from django.conf import settings
 from django.db import transaction
 from django.db.models import ImageField
+from botocore.exceptions import ClientError
 from django.core.serializers import serialize
 from redis.cluster import RedisCluster, ClusterNode
 from kafka import KafkaProducer, KafkaConsumer, errors as KafkaErrors
@@ -570,10 +572,74 @@ class Contract:
     def __init__(self):
         address = os.getenv("CONTRACT_ADDRESS")
         abi = os.getenv("CONTRACT_ABI")
-        self.instance = w3.eth.contract(address=address, abi=abi)
+        self.w3 = Web3()
+        self.instance = self.w3.eth.contract(address=address, abi=abi)
+        self.kms_client = boto3.client("kms", region_name="us-east-2")
 
-    def get_address(self, *kwargs):
-        self.instance.functions.getAddress(**kwargs).call()
+    def generate_wallet(self):
+        """
+        Generates an Ethereum wallet, encrypts the private key using AWS KMS,
+        and returns the wallet address and encrypted private key.
+
+        :return: A dictionary with the wallet address and encrypted private key.
+        """
+
+        # Generate a new Ethereum wallet
+        account = self.w3.eth.account.create()
+        address = account.address
+        private_key = account.key.hex()
+
+        # Encrypt the private key
+        encrypted_private_key = self.encrypt_private_key(private_key)
+
+        return {"address": address, "private_key": encrypted_private_key}
+
+    def encrypt_private_key(self, private_key: str) -> str:
+        """
+        Encrypts a private key using AWS KMS.
+
+        :param private_key: The private key to encrypt.
+        :return: Encrypted private key (hex-encoded ciphertext blob).
+        """
+        KMS_KEY_ID = os.getenv("KMS_KEY_ID")
+        if not KMS_KEY_ID:
+            logger.w(
+                "[KMS Encryption]: No KMS_KEY_ID is found",
+                service=Service.AUTH.value,
+                description="[KMS Encryption]: No KMS_KEY_ID is found (private key is not encrypted)",
+            )
+            return private_key
+
+        try:
+            response = self.kms_client.encrypt(KeyId=KMS_KEY_ID, Plaintext=private_key)
+            encrypted_key = response["CiphertextBlob"]
+            return encrypted_key.hex()  # Convert to hex string for storage
+        except ClientError as e:
+            logger.e(
+                f"Error encrypting private key: {e}",
+                service=Service.AUTH.value,
+                description=f"Error encrypting private key: {e}",
+            )
+            raise
+
+    def decrypt_private_key(self, encrypted_key: str) -> str:
+        """
+        Decrypts an encrypted private key using AWS KMS.
+
+        :param encrypted_key: The encrypted private key (hex-encoded ciphertext blob).
+        :return: The decrypted private key.
+        """
+        try:
+            encrypted_key_bytes = bytes.fromhex(encrypted_key)  # Convert back to bytes
+            response = self.kms_client.decrypt(CiphertextBlob=encrypted_key_bytes)
+            return response["Plaintext"].decode("utf-8")
+        except ClientError as e:
+            logger.e(
+                f"Error decrypting private key: {e}",
+                service=Service.AUTH.value,
+                description=f"Error decrypting private key: {e}",
+            )
+            raise
 
     def transfer(self, **kwargs):
         self.instance.functions.getDeployedProjects(**kwargs).call()
