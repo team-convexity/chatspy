@@ -64,6 +64,10 @@ class Asset(Enum):
             self.USDT_BEP20: Chain.BNB,
         }
         return ASSET_TO_CHAIN[self]
+
+    @classmethod
+    def has_symbol(cls, symbol):
+        return any(symbol == asset.value[0] for asset in cls)
     
     @property
     def is_token(self) -> bool:
