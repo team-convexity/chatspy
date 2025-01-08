@@ -43,9 +43,9 @@ class Asset(Enum):
     USDT_ERC20 = ("USDT", "Tether", TokenStandard.ERC20)
     USDT_BEP20 = ("USDT", "Tether", TokenStandard.BEP20)
     
-    def __init__(self, symbol, name, token_standard=None):
+    def __init__(self, symbol, display_name, token_standard=None):
         self.symbol = symbol
-        self.name = name
+        self.display_name = display_name
         self._token_standard = token_standard
     
     @property
@@ -87,9 +87,8 @@ class Contract:
                 service=Service.AUTH.value,
                 description="[Contract Init]: No ABI or Contract address found in the env",
             )
-        self.kms_client = boto3.client("kms", region_name="us-east-2")
 
-    def generate_wallet(self, asset: Asset = Asset.BTC, create_all: bool = False) -> List[Dict[str, str]]:
+    def generate_wallet(self, asset: Asset = Asset.BNB, create_all: bool = False) -> List[Dict[str, str]]:
         """
         Generates wallet(s) appropriate for the specified asset or all supported assets.
         For tokens, generates the appropriate chain's wallet.
@@ -129,12 +128,12 @@ class Contract:
                     private_key = wallet.seed
                     
                 case Chain.CARDANO:
-                    # Cardano wallet generation implementation
-                    raise NotImplementedError("Cardano wallet generation not implemented")
+                    # raise NotImplementedError("Cardano wallet generation not implemented")
+                    continue
                     
                 case Chain.BANTU:
-                    # Bantu wallet generation implementation
-                    raise NotImplementedError("Bantu wallet generation not implemented")
+                    # raise NotImplementedError("Bantu wallet generation not implemented")
+                    continue
                     
                 case Chain.DOGECOIN:
                     # Dogecoin uses the same format as Bitcoin
@@ -151,10 +150,10 @@ class Contract:
             encrypted_public_key = self.encrypt_key(public_key) if public_key else None
             
             wallet_data = {
-                "asset": asset.symbol,
-                "name": asset.name,
-                "chain": chain.value,
                 "address": address,
+                "chain": chain.value,
+                "asset": asset.symbol,
+                "display_name": asset.display_name,
                 "private_key": encrypted_private_key,
             }
             
@@ -177,6 +176,21 @@ class Contract:
         :return: Encrypted private key (hex-encoded ciphertext blob).
         """
         KMS_KEY_ID = os.getenv("KMS_KEY_ID")
+
+        if not hasattr(self, "kms_client"):
+            if os.getenv("DJANGO_SETTINGS_MODULE") == "authy.settings.development":
+                aws_access_key_id = os.getenv("AWS_ACCESS_KEY_ID")
+                aws_secret_access_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+                if not aws_access_key_id or not aws_secret_access_key:
+                    raise ValueError("AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY must be set in the environment.")
+                
+                self.kms_client = boto3.client("kms", region_name="us-east-2",
+                    aws_access_key_id=aws_access_key_id,
+                    aws_secret_access_key=aws_secret_access_key
+                )
+            else:
+                self.kms_client = boto3.client("kms", region_name="us-east-2")
+
         if not KMS_KEY_ID:
             logger.w(
                 "[KMS Encryption]: No KMS_KEY_ID is found",
@@ -187,8 +201,7 @@ class Contract:
 
         try:
             response = self.kms_client.encrypt(KeyId=KMS_KEY_ID, Plaintext=private_key)
-            encrypted_key = response["CiphertextBlob"]
-            return encrypted_key.hex()  # Convert to hex string for storage
+            return response["CiphertextBlob"]
         except ClientError as e:
             logger.e(
                 f"Error encrypting private key: {e}",
