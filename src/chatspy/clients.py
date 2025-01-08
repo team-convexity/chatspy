@@ -567,6 +567,11 @@ class Services:
     def get_client(cls, name: Literal["kafka", "producer", "account", "redis"]):
         return cls.clients.get(name)
 
+class WalletType(Enum):
+    ETHEREUM = "ethereum"
+    BITCOIN = "bitcoin"
+    SOLANA = "solana"
+    RIPPLE = "ripple"
 
 class Contract:
     def __init__(self, contract_address=None, contract_abi=None):
@@ -582,25 +587,78 @@ class Contract:
             )
         self.kms_client = boto3.client("kms", region_name="us-east-2")
 
-    def generate_wallet(self):
+    def generate_wallet(self, wallet_type: WalletType = WalletType.ETHEREUM, create_all: bool = False) -> List[Dict[str, str]]:
         """
-        Generates an Ethereum wallet, encrypts the private key using AWS KMS,
-        and returns the wallet address and encrypted private key.
+        Generates a wallet for the specified type or all wallets except Ethereum if specified,
+        encrypts the private and public keys (if available) using AWS KMS, and returns the wallet details.
 
-        :return: A dictionary with the wallet address and encrypted private key.
+        :param wallet_type: The type of wallet to generate (e.g., WalletType.ETHEREUM, WalletType.BITCOIN).
+        :param create_all: If True, generates all wallets except Ethereum.
+        :return: A list of dictionaries with the wallet details (type, address, encrypted private key, and encrypted public key).
         """
+        wallets = []
 
-        # Generate a new Ethereum wallet
-        account = self.w3.eth.account.create()
-        address = account.address
-        private_key = account.key.hex()
+        wallet_types_to_create = (
+            [wt for wt in WalletType if wt != WalletType.ETHEREUM]
+            if create_all
+            else [wallet_type]
+        )
 
-        # Encrypt the private key
-        encrypted_private_key = self.encrypt_private_key(private_key)
+        for wallet_type in wallet_types_to_create:
+            public_key = None
 
-        return {"address": address, "private_key": encrypted_private_key}
+            match wallet_type:
+                case WalletType.ETHEREUM:
+                    # Generate an Ethereum wallet
+                    account = self.w3.eth.account.create()
+                    address = account.address
+                    private_key = account.key.hex()
 
-    def encrypt_private_key(self, private_key: str) -> str:
+                case WalletType.BITCOIN:
+                    from bitcoin import random_key, privtopub, pubtoaddr
+
+                    private_key = random_key()
+                    public_key = privtopub(private_key)
+                    address = pubtoaddr(public_key)
+
+                case WalletType.SOLANA:
+                    from solana.keypair import Keypair
+
+                    keypair = Keypair.generate()
+                    private_key = keypair.secret_key.hex()
+                    public_key = keypair.public_key.to_base58().decode()
+                    address = public_key
+
+                case WalletType.RIPPLE:
+                    from xrpl.wallet import Wallet
+
+                    wallet = Wallet.create()
+                    address = wallet.classic_address
+                    private_key = wallet.seed
+
+                case _:
+                    logger.error(f"Unsupported wallet type: {wallet_type}")
+                    raise ValueError(f"Unsupported wallet type: {wallet_type}")
+
+            # Encrypt the private key
+            encrypted_private_key = self.encrypt_key(private_key)
+            encrypted_public_key = self.encrypt_key(public_key) if public_key else None
+
+            wallet_data = {
+                "wallet_type": wallet_type.value,
+                "address": address,
+                "private_key": encrypted_private_key,
+                "type": wallet_type
+            }
+
+            if encrypted_public_key:
+                wallet_data["public_key"] = encrypted_public_key
+
+            wallets.append(wallet_data)
+
+        return wallets
+
+    def encrypt_key(self, private_key: str) -> str:
         """
         Encrypts a private key using AWS KMS.
 
@@ -628,7 +686,7 @@ class Contract:
             )
             raise
 
-    def decrypt_private_key(self, encrypted_key: str) -> str:
+    def decrypt_key(self, encrypted_key: str) -> str:
         """
         Decrypts an encrypted private key using AWS KMS.
 

@@ -16,7 +16,10 @@ dependencies = [
     "web3>=7.6.1",
     "redis>=5.2.0",
     "boto3>=1.35.88",
-    "kafka-python-ng>=2.2.3"
+    "kafka-python-ng>=2.2.3",
+    "bitcoin>=1.1.42",
+    "solana>=0.36.2",
+    "xrpl-py>=4.0.0"
 ]
 
 [project.optional-dependencies]
