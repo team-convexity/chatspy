@@ -581,7 +581,7 @@ class Services:
 
     @classmethod
     def get_client(cls, name: ClientType):
-        return cls.clients.get(name.value)
+        return cls.clients.get(name)
 
 
 class IdentityClient:
