@@ -92,8 +92,8 @@ class NotificationPayload:
     comprehensive notification payload supporting multiple channels
     """
 
-    # recipient auth user IDs
-    recipients: List[str]  # recipicients' auth user IDs
+    # recipient auth user IDs or a list of Email strings
+    recipients: List[str]  # recipicients' auth user IDs or email strings.
 
     # notification content
     # when sending SMS, the notification service will only use title (discarding body)
