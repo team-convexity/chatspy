@@ -12,6 +12,7 @@ from dataclasses import dataclass, asdict
 from typing import Literal, Optional, Union, List, Dict
 
 import redis
+import requests
 from requests import request
 from django.db import models
 from django.conf import settings
@@ -23,6 +24,7 @@ from kafka import KafkaProducer, KafkaConsumer, errors as KafkaErrors
 
 from .utils import Logger
 from .services import Service
+from .schemas import IdentityVerificationSchema
 
 logger = Logger.get_logger()
 
@@ -33,6 +35,12 @@ class KafkaEvent(Enum):
     SendNotification = "SendNotification"
     OrganizationCreated = "OrganizationCreated"
 
+class ClientType(Enum):
+    KAFKA = "kafka"
+    PRODUCER = "producer"
+    ACCOUNT = "account"
+    REDIS = "redis"
+    IDENTITY = "identity"
 
 class ServiceClient:
     def __init__(self, service: Service):
@@ -507,6 +515,7 @@ class Services:
         group_id: str = None,
         message_handler=None,
         bufferd_producer=False,
+        http_clients: list[ClientType] | list[None] = [],  # list of clients to initialize. kafka and redis are initialized by default.
     ):
         """
         Args:
@@ -550,7 +559,17 @@ class Services:
         )
         cls.clients["kafka"] = KafkaClient(bootstrap_servers=os.getenv("KAFKA_SERVICE_URI"))
         cls.clients["producer"] = cls.clients["kafka"].create_producer(bufferd_producer=bufferd_producer)
-        cls.clients["account"] = AccountClient(service=Service.ACCOUNT)
+
+        if ClientType.ACCOUNT in http_clients:
+            cls.clients[ClientType.ACCOUNT.value] = AccountClient(service=Service.ACCOUNT)
+
+        if ClientType.IDENTITY in http_clients:
+            cls.clients[ClientType.IDENTITY.value] = IdentityClient(
+                secret=os.getenv("QORE_SECRET"),
+                base_url=os.getenv("QORE_BASE_URL"),
+                client_id=os.getenv("QORE_CLIENT_ID"),
+                login_url=os.getenv("QORE_LOGIN_URL"),
+            )
 
         if kafka_topics:
             consumer = cls.clients["kafka"].create_consumer(
@@ -561,5 +580,103 @@ class Services:
             consumer_thread.start()
 
     @classmethod
-    def get_client(cls, name: Literal["kafka", "producer", "account", "redis"]):
-        return cls.clients.get(name)
+    def get_client(cls, name: ClientType):
+        return cls.clients.get(name.value)
+
+
+class IdentityClient:
+    def __init__(self, base_url: str, client_id: str, secret: str, login_url: str):
+        self.url = base_url
+        self.secret = secret
+        self.client_id = client_id
+        self.login_url = login_url
+        self.request_headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        self.init_header = self.login()
+        self.login_headers = self.init_header
+
+    def build_url(self, stub: str) -> str:
+        """Build a URL by combining the stub with the endpoint"""
+
+        url = self.url + stub
+        return url
+
+    def login(self):
+        url = self.build_url(self.login_url)
+        try:
+            payload = {
+                "secret": self.secret,
+                "clientId": self.client_id,
+            }
+            data = requests.post(url, headers=self.request_headers, data=json.dumps(payload))
+            auth = None
+            bearerType = None
+            if data.ok:
+                res = data.json()
+                auth = res.get("accessToken")
+                bearerType = res.get("tokenType")
+
+            header = {"Authorization": f"{bearerType} {auth}"}
+            return self.request_headers.update(**header)
+        except Exception as e:
+            raise ValueError(e)
+
+    def verify_nin(self, id_number: str, payload: dict):
+        try:
+            identity = IdentityVerificationSchema.model_validate(payload)
+            return self.verify_identity(f"v1/ng/identities/virtual-nin/{id_number}", identity)
+        except Exception as e:
+            return self.error_response(e)
+
+    def verify_bvn(self, id_number: str, payload: dict):
+        try:
+            identity = IdentityVerificationSchema.model_validate(payload)
+            return self.verify_identity(f"v1/ng/identities/bvn-basic/{id_number}", identity)
+        except Exception as e:
+            return self.error_response(e)
+
+    def verify_driver_license(self, id_number: str, payload: dict):
+        try:
+            identity = IdentityVerificationSchema.model_validate(payload)
+            return self.verify_identity(f"v1/ng/identities/drivers-license/{id_number}", identity)
+        except Exception as e:
+            return self.error_response(e)
+
+    def verify_international_passport(self, id_number: str, payload: dict):
+        try:
+            identity = IdentityVerificationSchema.model_validate(payload)
+            return self.verify_identity(f"v1/ng/identities/passport/{id_number}", identity)
+        except Exception as e:
+            return self.error_response(e)
+
+    def verify_identity(self, url: str, data: IdentityVerificationSchema):
+        """
+        Send the data to the endpoint and return the response.
+        The data will be encrypted before posting and the response will be properly handled.
+        """
+        post_url = self.build_url(url)
+        header = self.request_headers
+        response = requests.post(post_url, data=json.dumps(data.model_dump()), headers=header)
+        if not response.ok:
+            self.login()
+            response = requests.post(
+                post_url,
+                headers=self.request_headers,
+                data=json.dumps(data.model_dump()),
+            )
+
+        response_json = response.json()
+        return self.prepare_response(**response_json)
+
+    def prepare_response(self, **kwargs):
+        """Ingest all attributes on the dictionary and set it as parameters"""
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+        self.update(kwargs)
+
+    def error_response(self, error):
+        """Prepare error response data object"""
+        _error = dict(status=False, data={"message": str(error), "status": "failed"})
+        return self.prepare_response(**_error)
