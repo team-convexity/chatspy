@@ -12,6 +12,7 @@ class SystemRole(Enum):
     VENDOR = "vendor"
     SUB_ADMIN = "subadmin"
     FIELD_AGENT = "fieldagent"
+    BENEFICIARY = "beneficiary"
     PROGRAM_LEAD = "programlead"
     M_AND_E_OFFICER = "m_and_e_officer"
     PROGRAM_CO_LEAD = "programcolead"
