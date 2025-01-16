@@ -69,6 +69,7 @@ class PermissionType(Enum):
 
 class Resource(Enum):
     USERS = "users"
+    ROLES = "roles"
     VENDOR = "vendor"
     PROJECT = "project"
     ACCOUNT = "account"
@@ -159,6 +160,9 @@ class Permissions(str, Enum):
     MANAGE_USERS = f"{PermissionType.MANAGE.value}:{Resource.USERS.value}"
     VIEW_USERS = f"{PermissionType.VIEW.value}:{Resource.USERS.value}"
 
+    MANAGE_ROLES = f"{PermissionType.MANAGE.value}:{Resource.ROLES.value}"
+    VIEW_ROLES = f"{PermissionType.VIEW.value}:{Resource.ROLES.value}"
+
     MANAGE_VENDOR = f"{PermissionType.MANAGE.value}:{Resource.VENDOR.value}"
     VIEW_VENDOR = f"{PermissionType.VIEW.value}:{Resource.VENDOR.value}"
 
@@ -192,10 +196,23 @@ class Permissions(str, Enum):
                 redis_client: RedisClient = Services.get_client("redis")
                 user_permissions = redis_client.get(f"user:{request.user.id}:permissions")
 
+                # if user is admin, allow access
+                token = request.headers.get("Authorization", "").split(" ")[1]
+                roles_permissions = verify_auth_token(token, verify=False)
+
+                if isinstance(roles_permissions, str):
+                    roles_permissions = json.loads(roles_permissions)
+
+                user_roles = roles_permissions.get("roles", [])
+                if any(
+                    [RegistrationRole.ADMIN_INDIVIDUAL.value in user_roles, RegistrationRole.NGO.value in user_roles]
+                ):
+                    # await the wrapped function properly if it's asynchronous
+                    if asyncio.iscoroutinefunction(func):
+                        return await func(request, *args, **kwargs)
+                    return func(request, *args, **kwargs)
+
                 if not user_permissions:
-                    token = request.headers.get("Authorization", "").split(" ")[1]
-                    roles_permissions = verify_auth_token(token, verify=False)
-                    user_roles = roles_permissions.get("roles", [])
                     perms = roles_permissions.get("permissions", [])
                     user_permissions = {
                         "roles": user_roles,
