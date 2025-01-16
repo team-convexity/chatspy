@@ -1,3 +1,4 @@
+import warnings
 from functools import wraps
 
 from django.http import JsonResponse
@@ -12,6 +13,11 @@ def permission_required(required_permission):
     def delete_project(request):
         ...
     """
+    warnings.warn(
+        "The 'permission_required' decorator is deprecated and will be removed in a future release.",
+        DeprecationWarning,
+        stacklevel=2
+    )
 
     def decorator(func):
         @wraps(func)
@@ -20,7 +26,7 @@ def permission_required(required_permission):
             roles_permissions = verify_auth_token(token)
 
             if required_permission not in roles_permissions["permissions"]:
-                return JsonResponse({"error": "Permission denied"}, status=403)
+                return JsonResponse({"error": {"message": "Permission denied"}}, status=403)
 
             return func(request, *args, **kwargs)
         return wrapper

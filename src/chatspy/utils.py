@@ -11,12 +11,14 @@ from .secret import Secret
 from .services import Service
 
 
-def verify_auth_token(token: str):
+def verify_auth_token(token: str, verify: bool = True):
     return jwt.decode(
         token,
-        Secret.get_service_pubkey(service=Service.AUTH),
+        Secret.get_service_key(service=Service.AUTH),
         algorithms=["RS256"],
+        verify=verify
     )
+
 
 def health_check(req):
     return HttpResponse()
@@ -33,10 +35,7 @@ class Monitoring:
             api_key = os.getenv("OPSGENIE_CHATS_API_KEY")
 
         self.api_url = os.getenv("OPSGENIE_API_URL")
-        self.headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"GenieKey {api_key}"
-        }
+        self.headers = {"Content-Type": "application/json", "Authorization": f"GenieKey {api_key}"}
 
     def alert(self, message, description=None, priority="P3", team=None):
         """
@@ -52,28 +51,22 @@ class Monitoring:
 
         if not self.api_url:
             self.prep(team)
-        
+
         if not self.api_url:
             return {"success": False, "error": "OPSGENIE_API_URL is not set."}
-        
-        data = {
-            "message": message,
-            "priority": priority,
-            "description": description,
-            "responders": []
-        }
+
+        data = {"message": message, "priority": priority, "description": description, "responders": []}
 
         if team:
             data["responders"].append({"name": team, "type": "team"})
-        
-        else:
-            data["responders"].append({"name":"chats", "type":"team"})
 
+        else:
+            data["responders"].append({"name": "chats", "type": "team"})
 
         response = requests.post(self.api_url, json=data, headers=self.headers)
         if response.ok:
             return {"success": True, "response": response.json()}
-        
+
         return {"success": False, "error": response.json()}
 
 
@@ -82,6 +75,7 @@ class Logger(Logger):
         dotenv.load_dotenv()
         self.monitoring = Monitoring()
         super(Logger, self).__init__(cfg)
+
     def d(self, message):
         return self.debug(msg=message)
 
@@ -95,9 +89,10 @@ class Logger(Logger):
     def w(self, message, service=None, description="Warning"):
         self.monitoring.alert(message=message, priority="P2", description=description, team=service)
         return self.warning(msg=message)
-    
+
     @staticmethod
     def get_logger():
         return Logger(Config())
+
 
 logger = Logger.get_logger()

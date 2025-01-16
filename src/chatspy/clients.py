@@ -35,12 +35,14 @@ class KafkaEvent(Enum):
     SendNotification = "SendNotification"
     OrganizationCreated = "OrganizationCreated"
 
+
 class ClientType(Enum):
     KAFKA = "kafka"
     PRODUCER = "producer"
     ACCOUNT = "account"
     REDIS = "redis"
     IDENTITY = "identity"
+
 
 class ServiceClient:
     def __init__(self, service: Service):
@@ -515,7 +517,8 @@ class Services:
         group_id: str = None,
         message_handler=None,
         bufferd_producer=False,
-        http_clients: list[ClientType] | list[None] = [],  # list of clients to initialize. kafka and redis are initialized by default.
+        http_clients: list[ClientType]
+        | list[None] = [],  # list of clients to initialize. kafka and redis are initialized by default.
     ):
         """
         Args:
@@ -544,6 +547,7 @@ class Services:
             "flush",
             "shell",
             "check",
+            "setup_service",
             "test",
             "inspectdb",
             "compilemessages",
