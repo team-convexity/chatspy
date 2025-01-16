@@ -137,7 +137,7 @@ class PermissionMapping:
                 resources=[Resource.BENEFICIARY],
             ),
             SystemRole.FIELD_AGENT.value: cls.generate_permissions(
-                permission_types=[PermissionType.VIEW],
+                permission_types=[PermissionType.MANAGE],
                 resources=[Resource.BENEFICIARY],
             ),
             SystemRole.M_AND_E_OFFICER.value: cls.generate_permissions(
