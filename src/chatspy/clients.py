@@ -614,15 +614,19 @@ class IdentityClient:
                 "secret": self.secret,
                 "clientId": self.client_id,
             }
+            print(payload, url)
             data = requests.post(url, headers=self.request_headers, data=json.dumps(payload))
             auth = None
             bearerType = None
+            print(data)
             if data.ok:
                 res = data.json()
+                print(res)
                 auth = res.get("accessToken")
                 bearerType = res.get("tokenType")
 
             header = {"Authorization": f"{bearerType} {auth}"}
+            print(header)
             return self.request_headers.update(**header)
         except Exception as e:
             raise ValueError(e)
@@ -663,22 +667,27 @@ class IdentityClient:
         post_url = self.build_url(url)
         header = self.request_headers
         response = requests.post(post_url, data=json.dumps(data.model_dump()), headers=header)
-        if not response.ok:
-            self.login()
+        response_json = response.json()
+        print("Response JSON:", response_json.get("status"))
+        if response_json.get("status") == 401:
+            headers = self.login()
+
+            print(headers)
             response = requests.post(
                 post_url,
                 headers=self.request_headers,
                 data=json.dumps(data.model_dump()),
             )
+            response_json = response.json()
 
-        response_json = response.json()
+
         return self.prepare_response(**response_json)
 
     def prepare_response(self, **kwargs):
         """Ingest all attributes on the dictionary and set it as parameters"""
         for k, v in kwargs.items():
             setattr(self, k, v)
-        self.update(kwargs)
+        return kwargs
 
     def error_response(self, error):
         """Prepare error response data object"""
