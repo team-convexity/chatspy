@@ -36,6 +36,7 @@ class RegistrationRole(RoleValueMixin):
     """These are users capable of registering themselves."""
 
     NGO = "ngo"
+    DONOR = "donor"
     VENDOR = "vendor"
     BENEFICIARY = "beneficiary"
     ADMIN_INDIVIDUAL = "adminindividual"
@@ -70,6 +71,7 @@ class PermissionType(Enum):
 class Resource(Enum):
     USERS = "users"
     ROLES = "roles"
+    ITEMS = "items"
     VENDOR = "vendor"
     PROJECT = "project"
     ACCOUNT = "account"
@@ -183,6 +185,9 @@ class Permissions(str, Enum):
 
     MANAGE_CASH_FOR_WORK = f"{PermissionType.MANAGE.value}:{Resource.CASH_FOR_WORK.value}"
     VIEW_CASH_FOR_WORK = f"{PermissionType.VIEW.value}:{Resource.CASH_FOR_WORK.value}"
+
+    MANAGE_ITEMS = f"{PermissionType.MANAGE.value}:{Resource.ITEMS.value}"
+    VIEW_ITEMS = f"{PermissionType.VIEW.value}:{Resource.ITEMS.value}"
 
     @staticmethod
     def permission_required(*required_permissions, mode: Literal["any", "all"] = "any"):
