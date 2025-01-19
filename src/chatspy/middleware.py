@@ -34,6 +34,9 @@ class BaseAuthMiddleware:
                 else:
                     User = apps.get_model("core.User", require_ready=False)
                     user = User.objects.get(id=ChatsRecord.from_global_id(user_id)[1])
+                
+                # inject auth profile here for use in views
+                setattr(user, "auth_profile", payload.get("profile", {}))
 
                 logger.i(f"Successfully authenticated {user}")
                 return True, user

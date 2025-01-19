@@ -3,7 +3,11 @@ from enum import Enum
 from typing import List, Dict
 
 import boto3
+import secrets
+from eth_account import Account
 from web3 import Web3
+from eth_keys import keys
+from eth_utils import decode_hex
 from botocore.exceptions import ClientError
 from stellar_sdk import Keypair as StellarKeypair
 from bitcoin import random_key, privtopub, pubtoaddr
@@ -103,19 +107,26 @@ class Contract:
                 )
 
             case Chain.ETHEREUM:
-                account = Web3().eth.account.create()
+                # enable HDWallet features
+                Account.enable_unaudited_hdwallet_features()
+                # extra entropy
+                account = Account.create(extra_entropy=secrets.token_hex(32))
                 address = account.address
+                # get private key and ensure proper format
                 private_key = account.key.hex()
-                public_key = account.public_key.hex()
+                if not private_key.startswith("0x"):
+                    private_key = "0x" + private_key
 
+                private_key_obj = keys.PrivateKey(decode_hex(private_key))
+                public_key = private_key_obj.public_key
                 wallets.append(
                     {
                         "address": address,
                         "chain": chain.value,
                         "asset": asset.symbol,
+                        "public_key": public_key.to_hex(),
                         "display_name": asset.display_name,
                         "private_key": Contract.encrypt_key(private_key),
-                        "public_key": public_key,
                     }
                 )
 

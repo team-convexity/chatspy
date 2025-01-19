@@ -54,7 +54,7 @@ for country in pycountry.countries:
         STATE_CHOICES[country.alpha_2] = [(subdivision.code, subdivision.name) for subdivision in subdivisions]
 
 
-def get_country_states(country_code):
+def get_country_states(country_code, default_value = []):
     """
     Returns a list of all states/regions in a country.
 
@@ -64,4 +64,4 @@ def get_country_states(country_code):
     Returns:
         list: A list of tuples containing state codes and names for the country.
     """
-    return STATE_CHOICES.get(country_code, [])
+    return STATE_CHOICES.get(country_code, default_value)
