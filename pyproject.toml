@@ -22,7 +22,8 @@ dependencies = [
     "xrpl-py>=4.0.0",
     "base58>=2.1.1",
     "mnemonic>=0.20",
-    "pycountry>=24.6.1"
+    "pycountry>=24.6.1",
+    "stellar-sdk==12.1.0"
 ]
 
 [project.optional-dependencies]
