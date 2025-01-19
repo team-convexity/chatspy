@@ -36,7 +36,6 @@ class RegistrationRole(RoleValueMixin):
     """These are users capable of registering themselves."""
 
     NGO = "ngo"
-    DONOR = "donor"
     VENDOR = "vendor"
     BENEFICIARY = "beneficiary"
     ADMIN_INDIVIDUAL = "adminindividual"
