@@ -247,3 +247,17 @@ class Permissions(str, Enum):
             return wrapper
 
         return decorator
+
+    @staticmethod
+    def has_organization_perm(user, organization_id: int):
+        from .models import ChatsRecord
+
+        auth_org = user.auth_profile.get("organization")
+        if not auth_org:
+            return False
+        
+        if isinstance(auth_org, list):
+            return organization_id in [ChatsRecord.from_global_id(org_id)[1] for org_id in auth_org]
+        
+        parsed_auth_org = ChatsRecord.from_global_id(auth_org)[1]
+        return parsed_auth_org == organization_id
