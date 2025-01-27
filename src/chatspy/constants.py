@@ -51,7 +51,7 @@ STATE_CHOICES = {}
 for country in pycountry.countries:
     subdivisions = pycountry.subdivisions.get(country_code=country.alpha_2)
     if subdivisions:
-        STATE_CHOICES[country.alpha_2] = [(subdivision.code, subdivision.name) for subdivision in subdivisions]
+        STATE_CHOICES[country.alpha_2] = [({"code": subdivision.code, "name": subdivision.name}) for subdivision in subdivisions]
 
 
 def get_country_states(country_code, default_value = []):
