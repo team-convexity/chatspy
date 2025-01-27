@@ -603,11 +603,12 @@ class IdentityClient:
 
     def build_url(self, stub: str) -> str:
         """Build a URL by combining the stub with the endpoint"""
-
-        url = self.url + stub
-        return url
+        return f"{self.url}{stub}"
 
     def login(self):
+        if not self.secret or not self.client_id or not self.login_url:
+            raise ValueError("[IdentityClient]: Missing required parameters")
+        
         url = self.build_url(self.login_url)
         try:
             payload = {
