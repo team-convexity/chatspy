@@ -80,7 +80,7 @@ class Logger(Logger):
         return self.debug(msg=message)
 
     def e(self, message, service=None, description="Error"):
-        self.error(description)
+        self.error(f"{message}: {description}")
         self.monitoring.alert(message=message, priority="P1", description=description, team=service)
         return self.error(msg=f"{message}: {description}")
 
@@ -88,7 +88,7 @@ class Logger(Logger):
         return self.info(msg=message)
 
     def w(self, message, service=None, description="Warning"):
-        self.warning(description)
+        self.warning(f"{message}: {description}")
         self.monitoring.alert(message=message, priority="P2", description=description, team=service)
         return self.warning(msg=f"{message}: {description}")
 
