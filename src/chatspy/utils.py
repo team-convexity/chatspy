@@ -82,7 +82,7 @@ class Logger(Logger):
     def e(self, message, service=None, description="Error"):
         self.error(description)
         self.monitoring.alert(message=message, priority="P1", description=description, team=service)
-        return self.error(msg=message)
+        return self.error(msg=f"{message}: {description}")
 
     def i(self, message):
         return self.info(msg=message)
@@ -90,7 +90,7 @@ class Logger(Logger):
     def w(self, message, service=None, description="Warning"):
         self.warning(description)
         self.monitoring.alert(message=message, priority="P2", description=description, team=service)
-        return self.warning(msg=message)
+        return self.warning(msg=f"{message}: {description}")
 
     @staticmethod
     def get_logger():
