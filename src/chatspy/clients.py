@@ -31,6 +31,7 @@ logger = Logger.get_logger()
 
 class KafkaEvent(Enum):
     UserCreated = "UserCreated"
+    DonorInvited = "DonorInvited"
     ProjectCreated = "ProjectCreated"
     SendNotification = "SendNotification"
     OrganizationCreated = "OrganizationCreated"

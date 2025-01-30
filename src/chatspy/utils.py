@@ -1,4 +1,6 @@
 import os
+import re
+import json
 
 import jwt
 import dotenv
@@ -98,3 +100,40 @@ class Logger(Logger):
 
 
 logger = Logger.get_logger()
+
+async def clean_inner_event_data(string: str):
+    if isinstance(string, list) or isinstance(string, dict):
+        return string
+
+    return re.sub(
+        r'\\+"|""null""|""|: ,|"\\"|\\\\',  # Handles multiple issues in one pattern
+        lambda match: {
+            '\\"': "",  # Remove escaped quotes
+            '""null""': "null",  # Replace ""null"" with null
+            '""': '"',  # Replace double double-quotes
+            ": ,": ": null,",  # Fix missing values
+            "\\\\": "",  # Remove backslashes
+        }.get(match.group(0), ""),  # Default fallback for unmatched cases
+        string,
+    )
+
+
+def clean_outer_event_data(data: dict):
+    """
+    cleans the data by removing extra escape characters and nested quotes.
+    """
+    if isinstance(data, dict):
+        for key, value in data.items():
+            data[key] = clean_outer_event_data(value)
+    elif isinstance(data, list):
+        for idx, item in enumerate(data):
+            data[idx] = clean_outer_event_data(item)
+
+    elif isinstance(data, str):
+        data = data.replace('\\"', '"').strip('"')
+        try:
+            data = json.loads(data)
+        except json.JSONDecodeError:
+            pass  # if it's not a valid json, leave it as a string
+
+    return data
