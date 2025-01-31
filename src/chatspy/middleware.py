@@ -51,7 +51,7 @@ class BaseAuthMiddleware:
             return False, ({"success": False, "error": {"message": "Invalid Token"}}, 401)
 
         except jwt.ExpiredSignatureError as e:
-            return False, ({"success": False, "error": {"message": "Token has expired"}}, 401)
+            return False, ({"success": False, "error": {"message": "Token has expired"}}, 499)
 
         except ObjectDoesNotExist as e:
             logger.e(
