@@ -583,6 +583,21 @@ class Services:
 
             consumer_thread = threading.Thread(target=consumer.consume_messages)
             consumer_thread.start()
+    
+    @classmethod
+    def reinitialize(cls, name: ClientType):
+        match name:
+            case ClientType.IDENTITY:
+                cls.clients[ClientType.IDENTITY.value] = IdentityClient(
+                    secret=os.getenv("QORE_SECRET"),
+                    base_url=os.getenv("QORE_BASE_URL"),
+                    client_id=os.getenv("QORE_CLIENT_ID"),
+                    login_url=os.getenv("QORE_LOGIN_URL"),
+                )
+                return cls.clients.get(name)
+
+            case _:
+                logger.warning("[Reinitialize]: No client match found")
 
     @classmethod
     def get_client(cls, name: ClientType):
