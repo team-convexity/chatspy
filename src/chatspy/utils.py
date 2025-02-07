@@ -137,3 +137,6 @@ def clean_outer_event_data(data: dict):
             pass  # if it's not a valid json, leave it as a string
 
     return data
+
+def is_production():
+    return True if "production" in os.getenv("DJANGO_SETTINGS_MODULE") else False

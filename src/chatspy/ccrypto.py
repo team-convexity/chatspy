@@ -4,16 +4,19 @@ from typing import List, Dict
 
 import boto3
 import secrets
-from eth_account import Account
 from web3 import Web3
 from eth_keys import keys
+from stellar_sdk import Server
+from eth_account import Account
 from eth_utils import decode_hex
 from botocore.exceptions import ClientError
 from stellar_sdk import Keypair as StellarKeypair
 from bitcoin import random_key, privtopub, pubtoaddr
 
-from .utils import logger
 from .services import Service
+from .utils import logger, is_production
+
+STELLAR_USDC_ACCOUNT_ID = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
 
 
 class Chain(Enum):
@@ -36,6 +39,23 @@ class Asset(Enum):
         self.symbol = symbol
         self.display_name = display_name
         self._token_standard = token_standard
+
+    @staticmethod
+    def get_balance(address: str, chain: Chain):
+        match chain:
+            case Chain.BITCOIN:
+                ...
+
+            case Chain.ETHEREUM:
+                ...
+
+            case Chain.STELLAR:
+                subdomain = "horizon." if is_production() else "horizon-testnet."
+                server = Server(horizon_url=f"https://{subdomain}stellar.org")
+                account = server.accounts().account_id(address).call()
+                return account["balances"]
+            case _:
+                logger.warning(f"Unkwown chain: {chain}")
 
     @property
     def chain(self) -> Chain:
