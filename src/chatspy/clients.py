@@ -587,7 +587,7 @@ class Services:
     @classmethod
     def reinitialize(cls, name: ClientType):
         match name:
-            case ClientType.IDENTITY:
+            case ClientType.IDENTITY.value:
                 cls.clients[ClientType.IDENTITY.value] = IdentityClient(
                     secret=os.getenv("QORE_SECRET"),
                     base_url=os.getenv("QORE_BASE_URL"),
@@ -597,7 +597,7 @@ class Services:
                 return cls.clients.get(name)
 
             case _:
-                logger.warning("[Reinitialize]: No client match found")
+                logger.warning(f"[Reinitialize]: No client match found: {name}")
 
     @classmethod
     def get_client(cls, name: ClientType):
