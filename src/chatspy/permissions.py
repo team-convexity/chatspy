@@ -160,11 +160,11 @@ class PermissionMapping:
             ),
             SystemRole.DONOR_CORPORATE.value: cls.generate_permissions(
                 permission_types=[PermissionType.VIEW],
-                resources=[Resource.PROJECT, Resource.BENEFICIARY, Resource.ACCOUNT],
+                resources=[Resource.PROJECT, Resource.BENEFICIARY, Resource.ACCOUNT, Resource.VENDOR],
             ),
             SystemRole.DONOR_INDIVIDUAL.value: cls.generate_permissions(
                 permission_types=[PermissionType.VIEW],
-                resources=[Resource.PROJECT, Resource.BENEFICIARY, Resource.ACCOUNT],
+                resources=[Resource.PROJECT, Resource.BENEFICIARY, Resource.ACCOUNT, Resource.VENDOR],
             )
         }
 
