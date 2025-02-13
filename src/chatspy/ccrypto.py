@@ -6,12 +6,11 @@ import boto3
 import secrets
 from web3 import Web3
 from eth_keys import keys
-from stellar_sdk import Server
 from eth_account import Account
 from eth_utils import decode_hex
 from botocore.exceptions import ClientError
-from stellar_sdk import Keypair as StellarKeypair
 from bitcoin import random_key, privtopub, pubtoaddr
+from stellar_sdk import Server, Keypair as StellarKeypair, Network, TransactionBuilder, Asset as StellarAsset
 
 from .services import Service
 from .utils import logger, is_production
@@ -64,6 +63,40 @@ class Asset(Enum):
                 return account["balances"]
             case _:
                 logger.warning(f"Unkwown chain: {chain}")
+
+    @staticmethod
+    def send_usdc(chain: Chain, source_address: str, destination_address: str, amount: str, source_secret: str):
+        match chain:
+            case Chain.STELLAR:
+                BASE_FEE = 100  # base fee, in stroops
+                subdomain = "horizon." if is_production() else "horizon-testnet."
+                server = Server(horizon_url=f"https://{subdomain}stellar.org")
+                source_keypair = StellarKeypair.from_secret(source_secret)
+                source_account = server.load_account(source_keypair.public_key)
+                asset = StellarAsset("USDC", get_stellar_asset_account_id())
+
+                transaction = (
+                    TransactionBuilder(
+                        source_account=source_account,
+                        network_passphrase=Network.PUBLIC_NETWORK_PASSPHRASE
+                        if is_production()
+                        else Network.TESTNET_NETWORK_PASSPHRASE,
+                        base_fee=BASE_FEE,
+                    )
+                    .append_payment_op(
+                        destination=destination_address,
+                        asset=asset,
+                        amount=amount
+                    )
+                    .set_timeout(30)
+                    .build()
+                )
+                transaction.sign(source_keypair)
+                response = server.submit_transaction(transaction)
+                return response
+
+            case _:
+                logger.warning(f"[Submit Transaction]: Unhandled Chain: {chain}")
 
     @property
     def chain(self) -> Chain:

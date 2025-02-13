@@ -35,6 +35,7 @@ class KafkaEvent(Enum):
     ProjectCreated = "ProjectCreated"
     SendNotification = "SendNotification"
     OrganizationCreated = "OrganizationCreated"
+    BroadcastTransaction = "BroadcastTransaction"
 
 
 class ClientType(Enum):
