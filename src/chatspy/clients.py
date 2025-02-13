@@ -34,6 +34,7 @@ class KafkaEvent(Enum):
     DonorInvited = "DonorInvited"
     ProjectCreated = "ProjectCreated"
     SendNotification = "SendNotification"
+    UserProfileUpdated = "UserProfileUpdated"
     OrganizationCreated = "OrganizationCreated"
     BroadcastTransaction = "BroadcastTransaction"
 
