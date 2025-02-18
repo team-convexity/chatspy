@@ -16,7 +16,7 @@ from .services import Service
 from .utils import logger, is_production
 
 STELLAR_USDC_ACCOUNT_ID = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
-TEST_STELLAR_USDC_ACCOUNT_ID = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+TEST_STELLAR_USDC_ACCOUNT_ID = "GBMAXTTNYNTJJCNUKZZBJLQD2ASIGZ3VBJT2HHX272LK7W4FPJCBEAYR"
 
 
 def get_stellar_asset_account_id():
@@ -24,6 +24,13 @@ def get_stellar_asset_account_id():
         return STELLAR_USDC_ACCOUNT_ID
 
     return TEST_STELLAR_USDC_ACCOUNT_ID
+
+def get_stellar_asset():
+    STELLAR_USDC_ACCOUNT_ID = get_stellar_asset_account_id()
+    if not is_production():
+        return StellarAsset("ChatsUSDC", TEST_STELLAR_USDC_ACCOUNT_ID)
+    
+    return StellarAsset("USDC", STELLAR_USDC_ACCOUNT_ID)
 
 
 class Chain(Enum):
