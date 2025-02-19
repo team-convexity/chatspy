@@ -80,7 +80,7 @@ class Asset(Enum):
                 server = Server(horizon_url=f"https://{subdomain}stellar.org")
                 source_keypair = StellarKeypair.from_secret(source_secret)
                 source_account = server.load_account(source_keypair.public_key)
-                asset = StellarAsset("USDC", get_stellar_asset_account_id())
+                asset = get_stellar_asset()
 
                 transaction = (
                     TransactionBuilder(
