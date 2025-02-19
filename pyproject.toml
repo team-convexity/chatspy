@@ -23,7 +23,9 @@ dependencies = [
     "base58>=2.1.1",
     "mnemonic>=0.20",
     "pycountry>=24.6.1",
-    "stellar-sdk==12.1.0"
+    "stellar-sdk==12.1.0",
+    "celery==5.4.0",
+    "celery-redbeat==2.2.0"
 ]
 
 [project.optional-dependencies]
