@@ -587,7 +587,7 @@ class Services:
             consumer_thread.start()
     
     @classmethod
-    def reinitialize(cls, name: ClientType):
+    def reinitialize(cls, name: ClientType, buffer=False):
         match name:
             case ClientType.IDENTITY.value:
                 cls.clients[ClientType.IDENTITY.value] = IdentityClient(
@@ -597,6 +597,12 @@ class Services:
                     login_url=os.getenv("QORE_LOGIN_URL"),
                 )
                 return cls.clients.get(name)
+            
+            case ClientType.KAFKA.value:
+                cls.clients["kafka"] = KafkaClient(bootstrap_servers=os.getenv("KAFKA_SERVICE_URI"))
+                cls.clients["producer"] = cls.clients["kafka"].create_producer(bufferd_producer=buffer)
+                
+                return cls.clients["producer"]
 
             case _:
                 logger.warning(f"[Reinitialize]: No client match found: {name}")
