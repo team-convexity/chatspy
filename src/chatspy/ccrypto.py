@@ -1,4 +1,5 @@
 import os
+import asyncio
 from enum import Enum
 from typing import List, Dict
 
@@ -53,6 +54,30 @@ class Asset(Enum):
         self.symbol = symbol
         self.display_name = display_name
         self._token_standard = token_standard
+
+    @staticmethod
+    async def get_transaction_history(address: str, chain: Chain):
+        match chain:
+            case Chain.BITCOIN:
+                return []
+
+            case Chain.ETHEREUM:
+                return []
+
+            case Chain.STELLAR:
+                subdomain = "horizon." if is_production() else "horizon-testnet."
+                server = Server(horizon_url=f"https://{subdomain}stellar.org")
+                return await asyncio.to_thread(server.transactions().for_account(address).call)
+
+            case _:
+                logger.warning(f"Unkwown chain: {chain}")
+
+    @staticmethod
+    async def get_stellar_transaction_operations(transaction_id: str):
+        """Fetch transaction operations asynchronously."""
+        subdomain = "horizon." if is_production() else "horizon-testnet."
+        server = Server(horizon_url=f"https://{subdomain}stellar.org")
+        return await asyncio.to_thread(server.transactions().transaction(transaction_id).call)
 
     @staticmethod
     def get_balance(address: str, chain: Chain):
