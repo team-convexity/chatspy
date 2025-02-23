@@ -1,17 +1,27 @@
 import os
 import asyncio
+import secrets
 from enum import Enum
-from typing import List, Dict
+from dataclasses import dataclass
+from typing import List, Optional, Dict, Any, Tuple
 
 import boto3
-import secrets
-from web3 import Web3
 from eth_keys import keys
 from eth_account import Account
 from eth_utils import decode_hex
 from botocore.exceptions import ClientError
 from bitcoin import random_key, privtopub, pubtoaddr
-from stellar_sdk import Server, Keypair as StellarKeypair, Network, TransactionBuilder, Asset as StellarAsset
+from stellar_sdk import (
+    xdr,
+    scval,
+    Server,
+    Network,
+    Address,
+    SorobanServer,
+    TransactionBuilder,
+    Asset as StellarAsset,
+    Keypair as StellarKeypair,
+)
 
 from .services import Service
 from .utils import logger, is_production
@@ -26,12 +36,28 @@ def get_stellar_asset_account_id():
 
     return TEST_STELLAR_USDC_ACCOUNT_ID
 
+
 def get_stellar_asset():
     STELLAR_USDC_ACCOUNT_ID = get_stellar_asset_account_id()
     if not is_production():
         return StellarAsset("ChatsUSDC", TEST_STELLAR_USDC_ACCOUNT_ID)
-    
+
     return StellarAsset("USDC", STELLAR_USDC_ACCOUNT_ID)
+
+
+@dataclass
+class Allowance:
+    amount: int
+    expiry: Optional[int]
+
+
+@dataclass
+class Roles:
+    super_admins: List[str]
+    admins: List[str]
+    ngos: List[str]
+    vendors: List[str]
+    beneficiaries: List[str]
 
 
 class Chain(Enum):
@@ -115,11 +141,7 @@ class Asset(Enum):
                         else Network.TESTNET_NETWORK_PASSPHRASE,
                         base_fee=BASE_FEE,
                     )
-                    .append_payment_op(
-                        destination=destination_address,
-                        asset=asset,
-                        amount=amount
-                    )
+                    .append_payment_op(destination=destination_address, asset=asset, amount=amount)
                     .set_timeout(30)
                     .build()
                 )
@@ -153,16 +175,52 @@ class Asset(Enum):
 
 
 class Contract:
-    def __init__(self, contract_address=None, contract_abi=None):
-        self.w3 = Web3()
-        if all([contract_abi, contract_address]):
-            self.instance = self.w3.eth.contract(address=contract_address, abi=contract_abi)
-        else:
-            logger.w(
-                "[Contract Init]: No ABI or Contract address found in the env",
-                service=Service.AUTH.value,
-                description="[Contract Init]: No ABI or Contract address found in the env",
-            )
+    """
+    Base class for interacting with smart contracts.
+    """
+
+    def initialize(self, owner: StellarKeypair) -> Dict[str, Any]: ...
+    def add_role(self, caller: StellarKeypair, project_id: str, role: str, new_member: str) -> Dict[str, Any]: ...
+    def remove_role(self, caller: StellarKeypair, project_id: str, role: str, member: str) -> Dict[str, Any]: ...
+    def pause_contract(self, caller: StellarKeypair) -> Dict[str, Any]: ...
+    def unpause_contract(self, caller: StellarKeypair) -> Dict[str, Any]: ...
+    def allocate_cash_allowance(
+        self, caller: StellarKeypair, project_id: str, allowee: str, amount: int, currency: str, expiry: Optional[int]
+    ) -> Dict[str, Any]: ...
+    def claim_cash_allowance(
+        self, caller: StellarKeypair, project_id: str, currency: str, amount: int, vendor: Optional[str]
+    ) -> Dict[str, Any]: ...
+    def allocate_item_allowance(
+        self, caller: StellarKeypair, project_id: str, allowee: str, item_id: str, quantity: int, expiry: Optional[int]
+    ) -> Dict[str, Any]: ...
+    def claim_item_allowance(
+        self, caller: StellarKeypair, vendor: str, project_id: str, item_id: str, quantity: int
+    ) -> Dict[str, Any]: ...
+    def allocate_cash_allowances_batch(
+        self, caller: StellarKeypair, project_id: str, allowances: List[Tuple[str, str, int, Optional[int]]]
+    ) -> Dict[str, Any]: ...
+    def allocate_item_allowances_batch(
+        self, caller: StellarKeypair, project_id: str, allowances: List[Tuple[str, str, int, Optional[int]]]
+    ) -> Dict[str, Any]: ...
+    def transfer_cash_allowance(
+        self, caller: StellarKeypair, project_id: str, new_allowee: str, currency: str, amount: int
+    ) -> Dict[str, Any]: ...
+    def transfer_item_allowance(
+        self, caller: StellarKeypair, project_id: str, new_allowee: str, item_id: str, quantity: int
+    ) -> Dict[str, Any]: ...
+    def redeem_item_claims(
+        self, vendor: StellarKeypair, project_id: Optional[str], item_id: str, quantity: int
+    ) -> Dict[str, Any]: ...
+    def redeem_cash_claims(
+        self, vendor: StellarKeypair, project_id: Optional[str], currency: str, amount: int
+    ) -> Dict[str, Any]: ...
+    def get_cash_allowance(self, project_id: str, allowee: str, currency: str) -> Dict[str, Any]: ...
+    def get_item_allowance(self, project_id: str, allowee: str, item_id: str) -> Dict[str, Any]: ...
+    def get_all_cash_allowances(self, project_id: str) -> Dict[str, Any]: ...
+    def get_all_item_allowances(self, project_id: str) -> Dict[str, Any]: ...
+    def get_total_cash_allowance(self, beneficiary: str, project_ids: List[str]) -> Dict[str, Any]: ...
+    def get_total_item_allowance(self, beneficiary: str, project_ids: List[str]) -> Dict[str, Any]: ...
+    def get_roles(self, project_id: str) -> Dict[str, Any]: ...
 
     @staticmethod
     def generate_wallet(asset: Asset = Asset.CHATS, create_all: bool = False) -> List[Dict[str, str]]:
@@ -299,35 +357,238 @@ class Contract:
             )
             raise
 
-    def transfer(self, **kwargs):
-        self.instance.functions.getDeployedProjects(**kwargs).call()
 
-    def withdraw(self, **kwargs):
-        """Withdraw funds from the project"""
-        self.instance.functions.withdraw(**kwargs).call()
+class StellarProjectContract(Contract):
+    def __init__(
+        self,
+        contract_id: str,
+        network_passphrase: Optional[str] = None,
+        rpc_url: Optional[str] = None,
+    ):
+        self.contract_id = contract_id
+        if is_production() and not all([network_passphrase, rpc_url]):
+            logger.error("RPC URL is required for production environment")
+            raise ValueError("RPC URL is required for production environment")
 
+        else:
+            self.network_passphrase = Network.TESTNET_NETWORK_PASSPHRASE
+            self.rpc_url = "https://soroban-testnet.stellar.org"
 
-class FactoryContract(Contract):
-    def create_organization(self, **kwargs):
-        self.instance.functions.createOrganization(**kwargs).call()
+        self.server = SorobanServer(self.rpc_url)
 
-    def deploy_project(self, **kwargs):
-        self.instance.functions.createProject(**kwargs).call()
+    def _invoke(self, fn_name: str, args: List[xdr.SCVal], signer: StellarKeypair) -> Dict[str, Any]:
+        """Generic function invoker"""
+        source = self.server.load_account(signer.public_key)
+        tx = (
+            TransactionBuilder(source, self.network_passphrase, self.server.estimate_fee() * 10000)
+            .add_time_bounds(0, 0)
+            .append_invoke_contract_function_op(contract_id=self.contract_id, function_name=fn_name, parameters=args)
+            .build()
+        )
+        sim = self.server.simulate_transaction(tx)
+        tx.set_footpoint(sim.footprint).sign(signer)
+        return self.server.send_transaction(tx)
 
+    def initialize(self, owner: StellarKeypair) -> Dict[str, Any]:
+        """Initialize the contract with an owner address"""
+        return self._invoke("initialize", [Address(owner.public_key).to_scval()], owner)
 
-class ProjectContract(Contract):
-    def claim(self, **kwargs):
-        """Vendor to claim funds"""
-        self.instance.functions.claimFunds(**kwargs).call()
+    def pause_contract(self, caller: StellarKeypair) -> Dict[str, Any]:
+        """Pause all contract operations"""
+        return self._invoke("pause_contract", [Address(caller.public_key).to_scval()], caller)
 
-    def add_vendor(self, **kwargs):
-        """Add vendor to the project"""
-        self.instance.functions.registerVendor(**kwargs).call()
+    def unpause_contract(self, caller: StellarKeypair) -> Dict[str, Any]:
+        """Resume contract operations"""
+        return self._invoke("unpause_contract", [Address(caller.public_key).to_scval()], caller)
 
-    def remove_vendor(self, **kwargs):
-        """Remove vendor from the project"""
-        self.instance.functions.deregisterVendor(**kwargs).call()
+    def add_role(self, caller: StellarKeypair, project_id: str, role: str, member: str) -> Dict[str, Any]:
+        """Add member to a specific project role"""
+        return self._invoke(
+            "add_role",
+            [
+                Address(caller.public_key).to_scval(),
+                scval.from_string(project_id),
+                scval.from_string(role),
+                Address(member).to_scval(),
+            ],
+            caller,
+        )
 
-    def update_max_spend_limit(self, **kwargs):
-        """Update the maximum spend limit"""
-        self.instance.functions.updateMaxSpendingLimit(**kwargs).call()
+    def remove_role(self, caller: StellarKeypair, project_id: str, role: str, member: str) -> Dict[str, Any]:
+        """Remove member from a project role"""
+        return self._invoke(
+            "remove_role",
+            [
+                Address(caller.public_key).to_scval(),
+                scval.from_string(project_id),
+                scval.from_string(role),
+                Address(member).to_scval(),
+            ],
+            caller,
+        )
+
+    def allocate_cash_allowance(
+        self,
+        caller: StellarKeypair,
+        project_id: str,
+        allowee: str,
+        amount: int,
+        currency: str,
+        expiry: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Create or update a cash allowance"""
+        args = [
+            Address(caller.public_key).to_scval(),
+            scval.from_string(project_id),
+            Address(allowee).to_scval(),
+            scval.from_u64(amount),
+            scval.from_string(currency),
+            scval.from_u64(expiry) if expiry else scval.from_void(),
+        ]
+        return self._invoke("allocate_cash_allowance", args, caller)
+
+    def allocate_item_allowance(
+        self,
+        caller: StellarKeypair,
+        project_id: str,
+        allowee: str,
+        item_id: str,
+        quantity: int,
+        expiry: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Create or update an item allowance"""
+        args = [
+            Address(caller.public_key).to_scval(),
+            scval.from_string(project_id),
+            Address(allowee).to_scval(),
+            scval.from_string(item_id),
+            scval.from_u64(quantity),
+            scval.from_u64(expiry) if expiry else scval.from_void(),
+        ]
+        return self._invoke("allocate_item_allowance", args, caller)
+
+    def allocate_cash_allowances_batch(
+        self, caller: StellarKeypair, project_id: str, allowances: List[Tuple[str, str, int, Optional[int]]]
+    ) -> Dict[str, Any]:
+        """Batch create/update cash allowances"""
+        args = [scval.from_string(project_id)]
+        for allowee, currency, amount, expiry in allowances:
+            args.extend(
+                [
+                    Address(allowee).to_scval(),
+                    scval.from_string(currency),
+                    scval.from_u64(amount),
+                    scval.from_u64(expiry) if expiry else scval.from_void(),
+                ]
+            )
+        return self._invoke("allocate_cash_allowances_batch", args, caller)
+
+    def allocate_item_allowances_batch(
+        self, caller: StellarKeypair, project_id: str, allowances: List[Tuple[str, str, int, Optional[int]]]
+    ) -> Dict[str, Any]:
+        """Batch create/update item allowances"""
+        args = [scval.from_string(project_id)]
+        for allowee, item_id, quantity, expiry in allowances:
+            args.extend(
+                [
+                    Address(allowee).to_scval(),
+                    scval.from_string(item_id),
+                    scval.from_u64(quantity),
+                    scval.from_u64(expiry) if expiry else scval.from_void(),
+                ]
+            )
+        return self._invoke("allocate_item_allowances_batch", args, caller)
+
+    def transfer_cash_allowance(
+        self, caller: StellarKeypair, project_id: str, new_allowee: str, currency: str, amount: int
+    ) -> Dict[str, Any]:
+        """Transfer cash allowance between beneficiaries"""
+        return self._invoke(
+            "transfer_cash_allowance",
+            [
+                Address(caller.public_key).to_scval(),
+                scval.from_string(project_id),
+                Address(new_allowee).to_scval(),
+                scval.from_string(currency),
+                scval.from_u64(amount),
+            ],
+            caller,
+        )
+
+    def transfer_item_allowance(
+        self, caller: StellarKeypair, project_id: str, new_allowee: str, item_id: str, quantity: int
+    ) -> Dict[str, Any]:
+        """Transfer item allowance between beneficiaries"""
+        return self._invoke(
+            "transfer_item_allowance",
+            [
+                Address(caller.public_key).to_scval(),
+                scval.from_string(project_id),
+                Address(new_allowee).to_scval(),
+                scval.from_string(item_id),
+                scval.from_u64(quantity),
+            ],
+            caller,
+        )
+
+    def redeem_item_claims(
+        self, vendor: StellarKeypair, project_id: Optional[str], item_id: str, quantity: int
+    ) -> Dict[str, Any]:
+        """Redeem vendor item claims"""
+        args = [
+            Address(vendor.public_key).to_scval(),
+            scval.from_string(project_id) if project_id else scval.from_void(),
+            scval.from_string(item_id),
+            scval.from_u64(quantity),
+        ]
+        return self._invoke("redeem_item_claims", args, vendor)
+
+    def redeem_cash_claims(
+        self, vendor: StellarKeypair, project_id: Optional[str], currency: str, amount: int
+    ) -> Dict[str, Any]:
+        """Redeem vendor cash claims"""
+        args = [
+            Address(vendor.public_key).to_scval(),
+            scval.from_string(project_id) if project_id else scval.from_void(),
+            scval.from_string(currency),
+            scval.from_u64(amount),
+        ]
+        return self._invoke("redeem_cash_claims", args, vendor)
+
+    def get_cash_allowance(self, project_id: str, allowee: str, currency: str) -> Allowance:
+        """Retrieve cash allowance details"""
+        key = xdr.LedgerKey.contract_data(
+            contract_id=xdr.ScAddress.from_string(self.contract_id),
+            key=scval.from_symbol("cash"),
+            durability=xdr.ContractDataDurability.PERSISTENT,
+        )
+        entry = self.server.get_ledger_entry(key)
+        return Allowance(amount=entry.data.get("amount", 0), expiry=entry.data.get("expiry"))
+
+    def get_total_cash_allowance(self, beneficiary: str, project_ids: List[str]) -> int:
+        """Calculate total cash allowance across multiple projects"""
+
+        total = 0
+        for pid in project_ids:
+            allowances = self.get_all_cash_allowances(pid)
+            for entry in allowances.values():
+                if entry["allowee"] == beneficiary:
+                    total += entry["amount"]
+        return total
+
+    def get_roles(self, project_id: str) -> Roles:
+        """Retrieve role assignments for a project"""
+
+        key = xdr.LedgerKey.contract_data(
+            contract_id=xdr.ScAddress.from_string(self.contract_id),
+            key=scval.from_symbol("roles"),
+            durability=xdr.ContractDataDurability.PERSISTENT,
+        )
+        entry = self.server.get_ledger_entry(key)
+        return Roles(
+            super_admins=entry.data.get("super_admins", []),
+            admins=entry.data.get("admins", []),
+            ngos=entry.data.get("ngos", []),
+            vendors=entry.data.get("vendors", []),
+            beneficiaries=entry.data.get("beneficiaries", []),
+        )
