@@ -45,6 +45,7 @@ class ClientType(Enum):
     ACCOUNT = "account"
     REDIS = "redis"
     IDENTITY = "identity"
+    STELLAR_CONTRACT = "stellar_contract"
 
 
 class ServiceClient:
@@ -578,6 +579,19 @@ class Services:
                 login_url=os.getenv("QORE_LOGIN_URL"),
             )
 
+        if ClientType.STELLAR_CONTRACT in http_clients:
+            from .ccrypto import StellarProjectContract
+
+            contract = os.getenv("STELLAR_CONTRACT_ID")
+            if not contract:
+                raise ValueError("Cannot initialize stellar contract client; STELLAR_CONTRACT_ID env not found")
+
+            rpc = os.getenv("STELLAR_CONTRACT_RPC_URL")
+            network_phrase = os.getenv("STELLAR_CONTRACT_NETWORK_PASSPHRASE")
+            cls.clients[ClientType.STELLAR_CONTRACT.value] = StellarProjectContract(
+                contract_id=contract, network_passphrase=network_phrase, rpc_url=rpc
+            )
+
         if kafka_topics:
             consumer = cls.clients["kafka"].create_consumer(
                 group_id=group_id, topics=kafka_topics, message_handler=message_handler
@@ -585,7 +599,7 @@ class Services:
 
             consumer_thread = threading.Thread(target=consumer.consume_messages)
             consumer_thread.start()
-    
+
     @classmethod
     def reinitialize(cls, name: ClientType, buffer=False):
         match name:
@@ -597,11 +611,11 @@ class Services:
                     login_url=os.getenv("QORE_LOGIN_URL"),
                 )
                 return cls.clients.get(name)
-            
+
             case ClientType.KAFKA.value:
                 cls.clients["kafka"] = KafkaClient(bootstrap_servers=os.getenv("KAFKA_SERVICE_URI"))
                 cls.clients["producer"] = cls.clients["kafka"].create_producer(bufferd_producer=buffer)
-                
+
                 return cls.clients["producer"]
 
             case _:
@@ -632,7 +646,7 @@ class IdentityClient:
     def login(self):
         if not self.secret or not self.client_id or not self.login_url:
             raise ValueError("[IdentityClient]: Missing required parameters")
-        
+
         url = self.build_url(self.login_url)
         try:
             payload = {
@@ -696,7 +710,6 @@ class IdentityClient:
                 data=json.dumps(data.model_dump()),
             )
             response_json = response.json()
-
 
         return self.prepare_response(**response_json)
 
