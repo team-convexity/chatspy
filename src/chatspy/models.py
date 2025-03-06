@@ -1,11 +1,12 @@
 import uuid
 import base64
 import struct
+import hashlib
 
 
 class ChatsRecord:
     @staticmethod
-    def resolve_id(obj):
+    def resolve_id(obj, deterministic=False):
         """
         Convert django decimal IDs into base64 gUID string and return it.
         """
@@ -15,10 +16,10 @@ class ChatsRecord:
         if isinstance(obj.id, str):
             return obj.id
 
-        return ChatsRecord.to_global_id(type(obj).__name__, int(obj.id))
+        return ChatsRecord.to_global_id(type(obj).__name__, int(obj.id), deterministic)
 
     @staticmethod
-    def to_global_id(type_name, id):
+    def to_global_id(type_name, id, deterministic=False):
         """
         args:
             type_name (str): The type of the object
@@ -30,13 +31,17 @@ class ChatsRecord:
 
         assert isinstance(id, int), "id should be of int type"
 
+        if deterministic:
+            hash_input = f"{type_name}:{id}".encode("utf-8")
+            unique_part = hashlib.sha256(hash_input).digest()[:8]
+
+        else:
+            unique_part = uuid.uuid4().bytes[:8]
+
         # embed the numeric ID into a GUID
         # convert django_id into a 64-bit binary representation
         id_bytes = struct.pack(">Q", id)
-
-        # generate a GUID with the ID embedded in its least significant bits
-        # use the first 8 bytes from a new UUID for uniqueness
-        unique_part = uuid.uuid4().bytes[:8]
+        # combine unique_part and id_bytes
         guid_bytes = unique_part + id_bytes
 
         # combine type name with GUID bytes
