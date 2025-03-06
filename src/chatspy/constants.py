@@ -20,7 +20,15 @@ SDG_GOALS = [
     (17, "Partnerships for the Goals"),
 ]
 
-CURRENCY_CHOICES = [
+CRYPTO_CURRENCIES = [
+    ("USDC", "USD Coin"),
+    ("BTC", "Bitcoin"),
+    ("USDT", "USD Tether"),
+    ("ETH", "Ethereum Ether"),
+    ("ChatsUSDC", "Chats USD Coin"),  # custom asset for dev/staging.
+]
+
+CURRENCY_CHOICES = CRYPTO_CURRENCIES + [
     ("USD", "United States Dollar"),
     ("EUR", "Euro"),
     ("JPY", "Japanese Yen"),
@@ -51,10 +59,12 @@ STATE_CHOICES = {}
 for country in pycountry.countries:
     subdivisions = pycountry.subdivisions.get(country_code=country.alpha_2)
     if subdivisions:
-        STATE_CHOICES[country.alpha_2] = [({"code": subdivision.code, "name": subdivision.name}) for subdivision in subdivisions]
+        STATE_CHOICES[country.alpha_2] = [
+            ({"code": subdivision.code, "name": subdivision.name}) for subdivision in subdivisions
+        ]
 
 
-def get_country_states(country_code, default_value = []):
+def get_country_states(country_code, default_value=[]):
     """
     Returns a list of all states/regions in a country.
 

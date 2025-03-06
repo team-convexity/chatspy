@@ -72,9 +72,10 @@ class TokenStandard(Enum):
 
 class Asset(Enum):
     BTC = ("BTC", "Bitcoin")
+    USDC = ("USDC", "USD Coin")
+    ETH = ("ETH", "Ethereum Native")
+    ChatsUSDC = ("ChatsUSDC", "Chats USD Coin")
     USDT = ("USDT", "Tether (ERC20)", TokenStandard.ERC20)
-    USDC = ("USDC", "USD Coin (Stellar)")
-    CHATS = ("CHATS", "Chats Token (Stellar)")
 
     def __init__(self, symbol, display_name, token_standard=None):
         self.symbol = symbol
@@ -103,7 +104,7 @@ class Asset(Enum):
         """Fetch transaction operations asynchronously."""
         subdomain = "horizon." if is_production() else "horizon-testnet."
         server = Server(horizon_url=f"https://{subdomain}stellar.org")
-        return await asyncio.to_thread(server.transactions().transaction(transaction_id).call)
+        return await asyncio.to_thread(lambda: server.operations().for_transaction(transaction_id).call())
 
     @staticmethod
     def get_balance(address: str, chain: Chain):
@@ -159,7 +160,8 @@ class Asset(Enum):
             self.BTC: Chain.BITCOIN,
             self.USDT: Chain.ETHEREUM,
             self.USDC: Chain.STELLAR,
-            self.CHATS: Chain.STELLAR,
+            self.ChatsUSDC: Chain.STELLAR,
+            self.ETH: Chain.ETHEREUM,
         }
         return ASSET_TO_CHAIN[self]
 
@@ -223,7 +225,7 @@ class Contract:
     def get_roles(self, project_id: str) -> Dict[str, Any]: ...
 
     @staticmethod
-    def generate_wallet(asset: Asset = Asset.CHATS, create_all: bool = False) -> List[Dict[str, str]]:
+    def generate_wallet(asset: Asset = Asset.ChatsUSDC, create_all: bool = False) -> List[Dict[str, str]]:
         """
         Generates a wallet appropriate for the specified asset. If `create_all` is True, generates wallets for all supported assets.
 
@@ -282,7 +284,7 @@ class Contract:
                 )
 
             case Chain.STELLAR:
-                if asset == Asset.USDC or asset == Asset.CHATS:
+                if asset == Asset.USDC or asset == Asset.ChatsUSDC:
                     keypair = StellarKeypair.random()
                     private_key = keypair.secret
                     public_key = keypair.public_key
@@ -366,6 +368,7 @@ class StellarProjectContract(Contract):
         rpc_url: Optional[str] = None,
     ):
         self.contract_id = contract_id
+        self.network_passphrase = network_passphrase
         if is_production() and not all([network_passphrase, rpc_url]):
             logger.error("RPC URL is required for production environment")
             raise ValueError("RPC URL is required for production environment")
@@ -376,22 +379,30 @@ class StellarProjectContract(Contract):
 
         self.server = SorobanServer(self.rpc_url)
 
-    def _invoke(self, fn_name: str, args: List[xdr.SCVal], signer: StellarKeypair) -> Dict[str, Any]:
+    def _invoke(self, fn_name: str, args: list[xdr.SCVal], signer: StellarKeypair):
         """Generic function invoker"""
         source = self.server.load_account(signer.public_key)
         tx = (
-            TransactionBuilder(source, self.network_passphrase, self.server.estimate_fee() * 10000)
+            TransactionBuilder(source, self.network_passphrase)
             .add_time_bounds(0, 0)
             .append_invoke_contract_function_op(contract_id=self.contract_id, function_name=fn_name, parameters=args)
             .build()
         )
+
         sim = self.server.simulate_transaction(tx)
-        tx.set_footpoint(sim.footprint).sign(signer)
-        return self.server.send_transaction(tx)
+        if sim.error:
+            raise Exception(f"Simulation failed: {sim.error}")
+
+        prepared_tx = self.server.prepare_transaction(tx, sim)
+
+        prepared_tx.sign(signer)
+        response = self.server.send_transaction(prepared_tx)
+
+        return response
 
     def initialize(self, owner: StellarKeypair) -> Dict[str, Any]:
         """Initialize the contract with an owner address"""
-        return self._invoke("initialize", [Address(owner.public_key).to_scval()], owner)
+        return self._invoke("initialize", [scval.to_address(owner.public_key)], owner)
 
     def pause_contract(self, caller: StellarKeypair) -> Dict[str, Any]:
         """Pause all contract operations"""
@@ -406,10 +417,10 @@ class StellarProjectContract(Contract):
         return self._invoke(
             "add_role",
             [
-                Address(caller.public_key).to_scval(),
-                scval.from_string(project_id),
-                scval.from_string(role),
-                Address(member).to_scval(),
+                scval.to_address(caller.public_key),
+                scval.to_string(project_id),
+                scval.to_string(role),
+                scval.to_address(member),
             ],
             caller,
         )
@@ -468,19 +479,30 @@ class StellarProjectContract(Contract):
         return self._invoke("allocate_item_allowance", args, caller)
 
     def allocate_cash_allowances_batch(
-        self, caller: StellarKeypair, project_id: str, allowances: List[Tuple[str, str, int, Optional[int]]]
+        self,
+        project_id: str,
+        caller_secret: str,
+        allowances: List[Tuple[str, str, int, Optional[int]]],
     ) -> Dict[str, Any]:
         """Batch create/update cash allowances"""
-        args = [scval.from_string(project_id)]
-        for allowee, currency, amount, expiry in allowances:
-            args.extend(
-                [
-                    Address(allowee).to_scval(),
-                    scval.from_string(currency),
-                    scval.from_u64(amount),
-                    scval.from_u64(expiry) if expiry else scval.from_void(),
-                ]
-            )
+
+        caller = StellarKeypair.from_secret(caller_secret)
+        allowances_vec = scval.to_vec(
+            [
+                scval.to_vec(
+                    [
+                        scval.to_address(allowee),
+                        scval.to_string(currency),
+                        scval.to_uint64(int(amount * (10**7))),
+                        scval.to_timepoint(expiry) if expiry else scval.to_void(),
+                    ]
+                )
+                for allowee, currency, amount, expiry in allowances
+            ]
+        )
+
+        args = [scval.to_address(caller.public_key), scval.to_string(project_id), allowances_vec]
+
         return self._invoke("allocate_cash_allowances_batch", args, caller)
 
     def allocate_item_allowances_batch(
@@ -488,13 +510,14 @@ class StellarProjectContract(Contract):
     ) -> Dict[str, Any]:
         """Batch create/update item allowances"""
         args = [scval.from_string(project_id)]
+        args = [project_id]
         for allowee, item_id, quantity, expiry in allowances:
             args.extend(
                 [
-                    Address(allowee).to_scval(),
-                    scval.from_string(item_id),
-                    scval.from_u64(quantity),
-                    scval.from_u64(expiry) if expiry else scval.from_void(),
+                    Address(allowee),
+                    item_id,
+                    quantity,
+                    expiry if expiry else None,
                 ]
             )
         return self._invoke("allocate_item_allowances_batch", args, caller)
