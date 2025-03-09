@@ -17,6 +17,7 @@ from stellar_sdk import (
     Server,
     Network,
     Address,
+    soroban_rpc,
     SorobanServer,
     TransactionBuilder,
     Asset as StellarAsset,
@@ -359,6 +360,45 @@ class Contract:
             )
             raise
 
+class SorbanResultParser:
+    """
+    A class to parse results returned by Soroban smart contract queries.
+    """
+
+    def parse_allowances(self, response: soroban_rpc.SimulateTransactionResponse, project_id: str) -> Dict[str, Any]:
+        """Parse the response from a contract call."""
+        data = {}
+        if response.results:
+            for result in response.results:
+                if result.xdr:
+                    sc_val = xdr.SCVal.from_xdr(result.xdr)
+                    allowances = self._extract_allowances(sc_val)
+                    data["allowances"] = {project_id: allowances}
+
+        if response.events:
+            data["events"] = self._parse_events(response.events)
+
+        return data
+
+    def _extract_allowances(self, sc_val: xdr.SCVal) -> Dict[str, Any]:
+        """Extract allowances from the SCVal"""
+        allowances = {}
+        if sc_val.type == xdr.SCValType.SCV_MAP:
+            for map_entry in sc_val.map.sc_map:
+                key: list[Address, str] = scval.to_native(map_entry.key)
+                value = scval.to_native(map_entry.val)
+                allowances[key[0].address] = value
+
+        return allowances
+
+    def _parse_events(self, events: list) -> list:
+        """Parse events emitted by the contract."""
+        decoded_events = []
+        for event in events:
+            decoded_event = xdr.SCVal.from_xdr(event)
+            decoded_events.append(decoded_event)
+        return decoded_events
+
 
 class StellarProjectContract(Contract):
     def __init__(
@@ -378,6 +418,7 @@ class StellarProjectContract(Contract):
             self.rpc_url = "https://soroban-testnet.stellar.org"
 
         self.server = SorobanServer(self.rpc_url)
+        self.parser = SorbanResultParser()
 
     def _invoke(self, fn_name: str, args: list[xdr.SCVal], signer: StellarKeypair):
         """Generic function invoker"""
@@ -399,6 +440,20 @@ class StellarProjectContract(Contract):
         response = self.server.send_transaction(prepared_tx)
 
         return response
+    
+    async def _query(self, function_name: str, args: list, caller, project_id) -> Dict[str, Any]:
+        loop = asyncio.get_event_loop()
+        trx_args = TransactionBuilder(
+            base_fee=100,
+            source_account=caller,
+            network_passphrase=self.network_passphrase,
+        ).add_time_bounds(0, 0).append_invoke_contract_function_op(
+            parameters=args,
+            function_name=function_name,
+            contract_id=self.contract_id,
+        ).build()
+        response = await loop.run_in_executor(None, self.server.simulate_transaction, trx_args)
+        return self.parser.parse_allowances(response, project_id)
 
     def initialize(self, owner: StellarKeypair) -> Dict[str, Any]:
         """Initialize the contract with an owner address"""
@@ -589,15 +644,9 @@ class StellarProjectContract(Contract):
         return Allowance(amount=entry.data.get("amount", 0), expiry=entry.data.get("expiry"))
 
     def get_total_cash_allowance(self, beneficiary: str, project_ids: List[str]) -> int:
-        """Calculate total cash allowance across multiple projects"""
-
-        total = 0
-        for pid in project_ids:
-            allowances = self.get_all_cash_allowances(pid)
-            for entry in allowances.values():
-                if entry["allowee"] == beneficiary:
-                    total += entry["amount"]
-        return total
+        caller = StellarKeypair.from_public_key(beneficiary)
+        args = [Address(beneficiary), scval.to_vec(project_ids)]
+        return self._query("get_total_cash_allowance", args, caller)
 
     def get_roles(self, project_id: str) -> Roles:
         """Retrieve role assignments for a project"""
@@ -615,3 +664,7 @@ class StellarProjectContract(Contract):
             vendors=entry.data.get("vendors", []),
             beneficiaries=entry.data.get("beneficiaries", []),
         )
+
+    async def get_all_cash_allowances(self, project_id: str, caller) -> Dict[str, Any]:
+        args = [scval.to_string(project_id)]
+        return await self._query("get_all_cash_allowances", args, caller, project_id)
