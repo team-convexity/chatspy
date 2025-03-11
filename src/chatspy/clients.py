@@ -1,15 +1,17 @@
 import os
 import sys
 import json
+import hmac
 import codecs
 import logging
+import hashlib
 import tempfile
 import threading
 from enum import Enum, auto
 from collections import defaultdict
 from datetime import datetime, timezone
 from dataclasses import dataclass, asdict
-from typing import Literal, Optional, Union, List, Dict
+from typing import Literal, Optional, Union, List, Dict, Any
 
 import redis
 import requests
@@ -723,3 +725,76 @@ class IdentityClient:
         """Prepare error response data object"""
         _error = dict(status=False, data={"message": str(error), "status": "failed"})
         return self.prepare_response(**_error)
+
+
+class PaymentClient:
+    ...
+
+    def transfer(): ...
+    def initialize(): ...
+    def verify_transaction(): ...
+
+
+class PaystackPaymentClient(PaymentClient):
+    SUCCESS_STATUS = "success"
+
+    def __init__(self, **kwargs):
+        self.secret_key = os.getenv("PAYSTACK_SECRET_KEY")
+        self.client = requests.Session()
+        self.client.headers["Authorization"] = f"Bearer {self.secret_key}"
+
+    def initialize(self, data: Dict[str, Any]) -> requests.Response:
+        try:
+            res = self.client.post("https://api.paystack.co/transaction/initialize", json=data)
+            res.raise_for_status()
+            logger.info(f"Transaction initialized: {res.json()}")
+            return res
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error initializing transaction: {e}")
+            raise
+
+    def verify_transaction(self, reference: str) -> Dict[str, Any]:
+        try:
+            res = self.client.get(f"https://api.paystack.co/transaction/verify/{reference}")
+            res.raise_for_status()
+            logger.info(f"Transaction verified: {res.json()}")
+            return res.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error verifying transaction: {e}")
+            raise
+
+    def transfer(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            res = self.client.post("https://api.paystack.co/transfer", json=data)
+            res.raise_for_status()
+            logger.info(f"Transfer initiated: {res.json()}")
+            return res.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error initiating transfer: {e}")
+            raise
+
+    def get_banks(self, currency: str = "NGN") -> requests.Response:
+        try:
+            res = self.client.get(f"https://api.paystack.co/bank?currency={currency}")
+            res.raise_for_status()
+            logger.info(f"Banks retrieved: {res.json()}")
+            return res
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error retrieving banks: {e}")
+            raise
+
+    def resolve_account(self, acc_number: str, bank_code: str) -> Dict[str, Any]:
+        try:
+            res = self.client.get(
+                f"https://api.paystack.co/bank/resolve?account_number={acc_number}&bank_code={bank_code}"
+            )
+            res.raise_for_status()
+            logger.info(f"Account resolved: {res.json()}")
+            return res.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error resolving account: {e}")
+            raise
+
+    @staticmethod
+    def calculate_hmac(data: bytes, secret: str) -> str:
+        return hmac.new(secret.encode("utf-8"), data, digestmod=hashlib.sha512).hexdigest()
