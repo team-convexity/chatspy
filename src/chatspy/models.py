@@ -31,8 +31,14 @@ class ChatsRecord:
 
         assert isinstance(id, int), "id should be of int type"
 
+        # encode negative numbers by setting the MSB and storing the absolute value
+        if id < 0:
+            encoded_id = (1 << 63) | (-id)  # set msb to 1 and store absolute value
+        else:
+            encoded_id = id  # Positive numbers remain unchanged
+
         if deterministic:
-            hash_input = f"{type_name}:{id}".encode("utf-8")
+            hash_input = f"{type_name}:{encoded_id}".encode("utf-8")
             unique_part = hashlib.sha256(hash_input).digest()[:8]
 
         else:
@@ -40,7 +46,7 @@ class ChatsRecord:
 
         # embed the numeric ID into a GUID
         # convert django_id into a 64-bit binary representation
-        id_bytes = struct.pack(">Q", id)
+        id_bytes = struct.pack(">Q", encoded_id)
         # combine unique_part and id_bytes
         guid_bytes = unique_part + id_bytes
 
@@ -68,6 +74,11 @@ class ChatsRecord:
         type_name, guid_bytes = decoded.split(b":", 1)
 
         # extract the numeric ID (last 8 bytes of the GUID)
-        django_id = struct.unpack(">Q", guid_bytes[-8:])[0]
+        encoded_id = struct.unpack(">Q", guid_bytes[-8:])[0]
+        # decode negative numbers by checking the MSB
+        if encoded_id & (1 << 63):  # check if the MSB is set
+            django_id = -(encoded_id & ~(1 << 63))  # clear the MSB and negate the value
+        else:
+            django_id = encoded_id
 
         return type_name.decode("utf-8"), django_id
