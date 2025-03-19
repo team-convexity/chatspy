@@ -48,6 +48,7 @@ class ClientType(Enum):
     REDIS = "redis"
     IDENTITY = "identity"
     STELLAR_CONTRACT = "stellar_contract"
+    PAYSTACK_PAYMENT_CLIENT = "paystack_payment_client"
 
 
 class ServiceClient:
@@ -593,6 +594,9 @@ class Services:
             cls.clients[ClientType.STELLAR_CONTRACT.value] = StellarProjectContract(
                 contract_id=contract, network_passphrase=network_phrase, rpc_url=rpc
             )
+
+        if ClientType.PAYSTACK_PAYMENT_CLIENT in http_clients:
+            cls.clients[ClientType.PAYSTACK_PAYMENT_CLIENT.value] = PaystackPaymentClient()
 
         if kafka_topics:
             consumer = cls.clients["kafka"].create_consumer(
