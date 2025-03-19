@@ -3,9 +3,10 @@ import os
 from celery import Celery
 from kombu import Queue, Exchange
 
-app = Celery("chats")
-class CeleryConfig:
+app = Celery("chats", include="chatspy.tasks")
 
+
+class CeleryConfig:
     def __init__(self):
         self.REDIS_URL = os.getenv("REDIS_LOCATION")
 
@@ -23,13 +24,18 @@ class CeleryConfig:
             # Queue settings
             "task_queues": (
                 Queue("default", Exchange("default"), routing_key="default"),
-                Queue("high_priority", Exchange("high_priority"), routing_key="high_priority"),
                 Queue("low_priority", Exchange("low_priority"), routing_key="low_priority"),
+                Queue("high_priority", Exchange("high_priority"), routing_key="high_priority"),
+                # Queue("authQ", Exchange("authQ"), routing_key="authQ"),
+                Queue("walletQ", Exchange("walletQ"), routing_key="walletQ"),
+                Queue("projectQ", Exchange("projectQ"), routing_key="projectQ"),
+                # Queue("notificationQ", Exchange("notificationQ"), routing_key="notificationQ"),
             ),
             "task_routes": {
-                "core.tasks.send_email": {"queue": "high_priority"},
-                # "core.tasks.default_task": {"queue": "default"},
-                # "core.tasks.background_task": {"queue": "low_priority"},
+                "core.tasks.activate_wallet": {"queue": "walletQ"},
+                "core.tasks.send_email": {"queue": "low_priority"},
+                # "core.tasks.retry_failed_transactions": {"queue": "low_priority"},
+                "core.tasks.process_unprocessed_donations": {"queue": "projectQ"},
             },
             # Worker settings
             "worker_concurrency": int(os.getenv("CELERY_WORKER_CONCURRENCY", "8")),
@@ -59,4 +65,4 @@ class CeleryConfig:
             # Logging
             "worker_log_format": "[%(asctime)s: %(levelname)s/%(processName)s] %(message)s",
             "worker_task_log_format": "[%(asctime)s: %(levelname)s/%(processName)s][%(task_name)s(%(task_id)s)] %(message)s",
-    }
+        }

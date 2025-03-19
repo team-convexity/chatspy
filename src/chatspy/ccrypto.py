@@ -24,11 +24,12 @@ from stellar_sdk import (
     Keypair as StellarKeypair,
 )
 
+from .import tasks
 from .services import Service
 from .utils import logger, is_production
 
-STELLAR_USDC_ACCOUNT_ID = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
-TEST_STELLAR_USDC_ACCOUNT_ID = "GBMAXTTNYNTJJCNUKZZBJLQD2ASIGZ3VBJT2HHX272LK7W4FPJCBEAYR"
+STELLAR_USDC_ACCOUNT_ID = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN" # mainnet
+TEST_STELLAR_USDC_ACCOUNT_ID = "GBMAXTTNYNTJJCNUKZZBJLQD2ASIGZ3VBJT2HHX272LK7W4FPJCBEAYR" # testnet.
 
 
 def get_stellar_asset_account_id():
@@ -287,7 +288,7 @@ class Contract:
             case Chain.STELLAR:
                 if asset == Asset.USDC or asset == Asset.ChatsUSDC:
                     keypair = StellarKeypair.random()
-                    private_key = keypair.secret
+                    private_key = Contract.encrypt_key(keypair.secret)
                     public_key = keypair.public_key
                     address = public_key
 
@@ -297,10 +298,11 @@ class Contract:
                             "chain": chain.value,
                             "asset": asset.symbol,
                             "display_name": asset.display_name,
-                            "private_key": Contract.encrypt_key(private_key),
+                            "private_key": private_key,
                             "public_key": public_key,
                         }
                     )
+                    tasks.activate_wallet.apply_async(kwargs={"account_private": private_key}, queue="walletQ")
 
             case _:
                 logger.error(f"Unsupported chain: {chain}")
