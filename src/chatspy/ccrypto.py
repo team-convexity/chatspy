@@ -24,12 +24,12 @@ from stellar_sdk import (
     Keypair as StellarKeypair,
 )
 
-from .import tasks
+from . import tasks
 from .services import Service
 from .utils import logger, is_production
 
-STELLAR_USDC_ACCOUNT_ID = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN" # mainnet
-TEST_STELLAR_USDC_ACCOUNT_ID = "GBMAXTTNYNTJJCNUKZZBJLQD2ASIGZ3VBJT2HHX272LK7W4FPJCBEAYR" # testnet.
+STELLAR_USDC_ACCOUNT_ID = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"  # mainnet
+TEST_STELLAR_USDC_ACCOUNT_ID = "GBMAXTTNYNTJJCNUKZZBJLQD2ASIGZ3VBJT2HHX272LK7W4FPJCBEAYR"  # testnet.
 
 
 def get_stellar_asset_account_id():
@@ -362,6 +362,7 @@ class Contract:
             )
             raise
 
+
 class SorbanResultParser:
     """
     A class to parse results returned by Soroban smart contract queries.
@@ -442,18 +443,23 @@ class StellarProjectContract(Contract):
         response = self.server.send_transaction(prepared_tx)
 
         return response
-    
+
     async def _query(self, function_name: str, args: list, caller, project_id) -> Dict[str, Any]:
         loop = asyncio.get_event_loop()
-        trx_args = TransactionBuilder(
-            base_fee=100,
-            source_account=caller,
-            network_passphrase=self.network_passphrase,
-        ).add_time_bounds(0, 0).append_invoke_contract_function_op(
-            parameters=args,
-            function_name=function_name,
-            contract_id=self.contract_id,
-        ).build()
+        trx_args = (
+            TransactionBuilder(
+                base_fee=100,
+                source_account=caller,
+                network_passphrase=self.network_passphrase,
+            )
+            .add_time_bounds(0, 0)
+            .append_invoke_contract_function_op(
+                parameters=args,
+                function_name=function_name,
+                contract_id=self.contract_id,
+            )
+            .build()
+        )
         response = await loop.run_in_executor(None, self.server.simulate_transaction, trx_args)
         return self.parser.parse_allowances(response, project_id)
 
@@ -586,11 +592,11 @@ class StellarProjectContract(Contract):
         return self._invoke(
             "transfer_cash_allowance",
             [
-                Address(caller.public_key).to_scval(),
-                scval.from_string(project_id),
-                Address(new_allowee).to_scval(),
-                scval.from_string(currency),
-                scval.from_u64(amount),
+                scval.to_address(caller.public_key),
+                scval.to_string(project_id),
+                scval.to_address(new_allowee),
+                scval.to_string(currency),
+                scval.to_uint64(int(amount * (10**7))),
             ],
             caller,
         )
