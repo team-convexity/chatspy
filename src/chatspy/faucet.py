@@ -50,14 +50,19 @@ class StellarFaucet:
         if no asset_code or asset_issuer is provided, defaults to chatsusdc.
         """
         try:
+            if not sponsor_keypair:
+                from .ccrypto import Contract
+                contract_owner_seed = os.getenv("STELLAR_CONTRACT_OWNER_SEED_PHRASE")
+                if not contract_owner_seed:
+                    raise ValueError("stellar_contract_owner_seed_phrase is not set in the environment.")
+
+                decrypted_seed = Contract.decrypt_key(contract_owner_seed)
+                sponsor_keypair = Keypair.from_mnemonic_phrase(decrypted_seed)
+
             account_public = account_keypair.public_key
 
             # default to chatsusdc if no asset_code/issuer is provided
-            asset = (
-                self.chats_usdc 
-                if (asset_code is None or asset_issuer is None) 
-                else Asset(asset_code, asset_issuer)
-            )
+            asset = self.chats_usdc if (asset_code is None or asset_issuer is None) else Asset(asset_code, asset_issuer)
 
             # load the SPONSOR'S account (not the sponsored account)
             sponsor_account = self.server.load_account(sponsor_keypair.public_key)
@@ -72,7 +77,7 @@ class StellarFaucet:
                 .append_begin_sponsoring_future_reserves_op(sponsored_id=account_public)
                 .append_change_trust_op(
                     asset=asset,
-                    source=account_public  # operation is performed by the sponsored account
+                    source=account_public,  # operation is performed by the sponsored account
                 )
                 .append_end_sponsoring_future_reserves_op(source=account_public)
                 .set_timeout(30)
@@ -154,3 +159,12 @@ class StellarFaucet:
         response = self.server.submit_transaction(transaction)
         logger.i(f"Sent {amount} ChatsUSDC to {recipient_public}")
         return response
+
+    def create_chats_usdc_asset(self):
+        """Define and create the ChatsUSDC asset."""
+
+        self.chats_usdc = Asset("ChatsUSDC", self.issuer_public)
+        logger.i(f"Defined ChatsUSDC asset with issuer: {self.issuer_public}")
+        self.create_trustline(self.distributor_keypair)
+        self.issue_chats_usdc()
+        logger.i("ChatsUSDC asset created and issued to distributor.")
