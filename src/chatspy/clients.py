@@ -517,6 +517,19 @@ class KafkaClient:
 class Services:
     clients = {}
 
+    @staticmethod
+    def initialize_soroban():
+        from .ccrypto import StellarProjectContract
+        contract = os.getenv("STELLAR_CONTRACT_ID")
+        if not contract:
+            raise ValueError("Cannot initialize stellar contract client; STELLAR_CONTRACT_ID env not found")
+
+        rpc = os.getenv("STELLAR_CONTRACT_RPC_URL")
+        network_phrase = os.getenv("STELLAR_CONTRACT_NETWORK_PASSPHRASE")
+        return StellarProjectContract(
+            contract_id=contract, network_passphrase=network_phrase, rpc_url=rpc
+        )
+
     @classmethod
     def initialize_clients(
         cls,
@@ -583,17 +596,7 @@ class Services:
             )
 
         if ClientType.STELLAR_CONTRACT in http_clients:
-            from .ccrypto import StellarProjectContract
-
-            contract = os.getenv("STELLAR_CONTRACT_ID")
-            if not contract:
-                raise ValueError("Cannot initialize stellar contract client; STELLAR_CONTRACT_ID env not found")
-
-            rpc = os.getenv("STELLAR_CONTRACT_RPC_URL")
-            network_phrase = os.getenv("STELLAR_CONTRACT_NETWORK_PASSPHRASE")
-            cls.clients[ClientType.STELLAR_CONTRACT.value] = StellarProjectContract(
-                contract_id=contract, network_passphrase=network_phrase, rpc_url=rpc
-            )
+            cls.clients[ClientType.STELLAR_CONTRACT.value] = cls.initialize_soroban()
 
         if ClientType.PAYSTACK_PAYMENT_CLIENT in http_clients:
             cls.clients[ClientType.PAYSTACK_PAYMENT_CLIENT.value] = PaystackPaymentClient()
@@ -623,6 +626,11 @@ class Services:
                 cls.clients["producer"] = cls.clients["kafka"].create_producer(bufferd_producer=buffer)
 
                 return cls.clients["producer"]
+            
+            case ClientType.STELLAR_CONTRACT.value:
+                client = cls.initialize_soroban()
+                cls.clients[ClientType.STELLAR_CONTRACT.value] = client
+                return client
 
             case _:
                 logger.warning(f"[Reinitialize]: No client match found: {name}")
