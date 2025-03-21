@@ -503,21 +503,22 @@ class StellarProjectContract(Contract):
 
     def allocate_cash_allowance(
         self,
-        caller: StellarKeypair,
-        project_id: str,
-        allowee: str,
         amount: int,
+        allowee: str,
         currency: str,
+        project_id: str,
+        caller_secret: str,
         expiry: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Create or update a cash allowance"""
+        caller = StellarKeypair.from_secret(caller_secret)
         args = [
-            Address(caller.public_key).to_scval(),
-            scval.from_string(project_id),
-            Address(allowee).to_scval(),
-            scval.from_u64(amount),
-            scval.from_string(currency),
-            scval.from_u64(expiry) if expiry else scval.from_void(),
+            scval.to_address(caller.public_key),
+            scval.to_string(project_id),
+            scval.to_address(allowee),
+            scval.to_uint64(int(amount * (10**7))),
+            scval.to_string(currency),
+            scval.to_timepoint(expiry) if expiry else scval.to_void(),
         ]
         return self._invoke("allocate_cash_allowance", args, caller)
 
@@ -586,9 +587,10 @@ class StellarProjectContract(Contract):
         return self._invoke("allocate_item_allowances_batch", args, caller)
 
     def transfer_cash_allowance(
-        self, caller: StellarKeypair, project_id: str, new_allowee: str, currency: str, amount: int
+        self, caller_secret: StellarKeypair, project_id: str, new_allowee: str, currency: str, amount: int
     ) -> Dict[str, Any]:
         """Transfer cash allowance between beneficiaries"""
+        caller = StellarKeypair.from_secret(caller_secret)
         return self._invoke(
             "transfer_cash_allowance",
             [
@@ -676,3 +678,24 @@ class StellarProjectContract(Contract):
     async def get_all_cash_allowances(self, project_id: str, caller) -> Dict[str, Any]:
         args = [scval.to_string(project_id)]
         return await self._query("get_all_cash_allowances", args, caller, project_id)
+
+    def claim_cash_allowance(
+        self, caller_secret: StellarKeypair, project_id: str, currency: str, amount: int, vendor: Optional[str]
+    ) -> Dict[str, Any]:
+        """
+        Claim cash allowance by beneficiaries
+
+        Vendor is optional, the beneficiary's allowance is debited and the vendor is credited if vendor is supplied, otherwise the beneficiary gets debited and that's it.
+        """
+        caller_keypair = StellarKeypair.from_secret(caller_secret)
+        return self._invoke(
+            "claim_cash_allowance",
+            [
+                scval.to_address(caller_keypair.public_key),
+                scval.to_string(project_id),
+                scval.to_address(vendor) if vendor else scval.to_void(),
+                scval.to_string(currency),
+                scval.to_uint64(int(amount * (10**7))),
+            ],
+            caller_keypair,
+        )
