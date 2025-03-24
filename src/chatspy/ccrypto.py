@@ -432,11 +432,12 @@ class StellarProjectContract(Contract):
 
             decrypted_seed = Contract.decrypt_key(contract_owner_seed)
             sponsor = StellarKeypair.from_mnemonic_phrase(decrypted_seed)
+            signer_account = self.server.load_account(signer.public_key)
 
             inner_tx = (
                 TransactionBuilder(
                     base_fee=100 * 2,
-                    source_account=signer,
+                    source_account=signer_account,
                     network_passphrase=self.network_passphrase,
                 )
                 .append_invoke_contract_function_op(
