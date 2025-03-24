@@ -79,6 +79,7 @@ class StellarFaucet:
                     asset=asset,
                     source=account_public,  # operation is performed by the sponsored account
                 )
+                .append_end_sponsoring_future_reserves_op(source=account_public)
                 .set_timeout(30)
                 .build()
             )
