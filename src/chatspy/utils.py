@@ -14,12 +14,7 @@ from .services import Service
 
 
 def verify_auth_token(token: str, verify: bool = True):
-    return jwt.decode(
-        token,
-        Secret.get_service_key(service=Service.AUTH),
-        algorithms=["RS256"],
-        verify=verify
-    )
+    return jwt.decode(token, Secret.get_service_key(service=Service.AUTH), algorithms=["RS256"], verify=verify)
 
 
 def health_check(req):
@@ -101,6 +96,7 @@ class Logger(Logger):
 
 logger = Logger.get_logger()
 
+
 async def clean_inner_event_data(string: str):
     if isinstance(string, list) or isinstance(string, dict):
         return string
@@ -138,5 +134,61 @@ def clean_outer_event_data(data: dict):
 
     return data
 
+
 def is_production():
     return True if "production" in os.getenv("DJANGO_SETTINGS_MODULE") else False
+
+
+def get_ip_location(ip_address: str) -> dict | None:
+    """
+    returns the country code and name for a given IP address using the GeoIP2 database.
+    """
+
+    from geoip2 import database, errors  # type: ignore
+
+    geoip_db_path = "./_database/geoliteii_country.mmdb"
+
+    try:
+        # load the db
+        reader = database.Reader(geoip_db_path)
+
+        response = reader.country(ip_address)
+        country_code = response.country.iso_code
+        country_name = response.country.name
+        return {"country_code": country_code, "country_name": country_name}
+
+    except errors.AddressNotFoundError:
+        return None
+
+    except Exception as e:
+        logger.error(f"Cannot retrieve ip location for {ip_address}:: {str(e)}")
+        return None
+
+
+def get_currency_from_country_code(country_code, cache_client) -> str | None:
+    cache_key = f"currency_{country_code}"
+
+    currency_code = cache_client.get(cache_key)
+    if currency_code:
+        return currency_code
+
+    url = f"https://restcountries.com/v3.1/alpha/{country_code}"
+    try:
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        if data:
+            currencies = data[0].get("currencies", {})
+            if currencies:
+                currency_code = list(currencies.keys())[0]
+
+                cache_client.set(cache_key, currency_code, timeout=None)
+                return currency_code
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"error fetching currency for {country_code}: {e}")
+
+    except (KeyError, IndexError, ValueError) as e:
+        logger.error(f"error parsing api response for {country_code}: {e}")
+
+    return None

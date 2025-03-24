@@ -79,7 +79,6 @@ class StellarFaucet:
                     asset=asset,
                     source=account_public,  # operation is performed by the sponsored account
                 )
-                .append_end_sponsoring_future_reserves_op(source=account_public)
                 .set_timeout(30)
                 .build()
             )
@@ -94,6 +93,50 @@ class StellarFaucet:
 
         except Exception as e:
             logger.error(f"failed to create trustline: {str(e)}")
+            raise
+
+    def end_sponsorship(self, account_keypair, sponsor_keypair=None):
+        """
+        end sponsorship for a specific account.
+        
+        when a wallet, user, or ngo is deactivated/deleted, this removes their sponsorship
+        """
+        try:
+            if not sponsor_keypair:
+                from .ccrypto import Contract
+                contract_owner_seed = os.getenv("STELLAR_CONTRACT_OWNER_SEED_PHRASE")
+                if not contract_owner_seed:
+                    raise ValueError("stellar_contract_owner_seed_phrase is not set in the environment.")
+
+                decrypted_seed = Contract.decrypt_key(contract_owner_seed)
+                sponsor_keypair = Keypair.from_mnemonic_phrase(decrypted_seed)
+
+            account_public = account_keypair.public_key
+
+            # load the sponsor'S account
+            sponsor_account = self.server.load_account(sponsor_keypair.public_key)
+
+            # build transaction to end sponsorship
+            transaction = (
+                TransactionBuilder(
+                    source_account=sponsor_account,
+                    network_passphrase=self.network_passphrase,
+                    base_fee=BASE_FEE,
+                )
+                .append_end_sponsoring_future_reserves_op(source=account_public)
+                .set_timeout(30)
+                .build()
+            )
+
+            # sponsor signs the transaction
+            transaction.sign(sponsor_keypair)
+
+            response = self.server.submit_transaction(transaction)
+            logger.info(f"sponsorship ended for {account_public}")
+            return response
+
+        except Exception as e:
+            logger.error(f"failed to end sponsorship: {str(e)}")
             raise
 
     def issue_chats_usdc(self, amount="1000000"):

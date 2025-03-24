@@ -425,24 +425,53 @@ class StellarProjectContract(Contract):
 
     def _invoke(self, fn_name: str, args: list[xdr.SCVal], signer: StellarKeypair):
         """Generic function invoker"""
-        source = self.server.load_account(signer.public_key)
-        tx = (
-            TransactionBuilder(source, self.network_passphrase)
-            .add_time_bounds(0, 0)
-            .append_invoke_contract_function_op(contract_id=self.contract_id, function_name=fn_name, parameters=args)
-            .build()
-        )
+        try:
+            contract_owner_seed = os.getenv("STELLAR_CONTRACT_OWNER_SEED_PHRASE")
+            if not contract_owner_seed:
+                raise ValueError("stellar_contract_owner_seed_phrase not set")
 
-        sim = self.server.simulate_transaction(tx)
-        if sim.error:
-            raise Exception(f"Simulation failed: {sim.error}")
+            decrypted_seed = Contract.decrypt_key(contract_owner_seed)
+            sponsor = StellarKeypair.from_mnemonic_phrase(decrypted_seed)
 
-        prepared_tx = self.server.prepare_transaction(tx, sim)
+            inner_tx = (
+                TransactionBuilder(
+                    base_fee=100 * 2,
+                    source_account=signer,
+                    network_passphrase=self.network_passphrase,
+                )
+                .append_invoke_contract_function_op(
+                    parameters=args,
+                    function_name=fn_name,
+                    source=signer.public_key,
+                    contract_id=self.contract_id,
+                )
+                .set_timeout(30)
+                .build()
+            )
 
-        prepared_tx.sign(signer)
-        response = self.server.send_transaction(prepared_tx)
+            sim_resp = self.server.simulate_transaction(inner_tx)
+            if sim_resp.error:
+                raise Exception(f"simulation failed: {sim_resp.error}")
 
-        return response
+            prepared_tx = self.server.prepare_transaction(inner_tx, sim_resp)
+            prepared_tx.sign(signer)
+
+            # sponsor
+            fee_bump_tx = TransactionBuilder.build_fee_bump_transaction(
+                fee_source=sponsor.public_key,
+                inner_transaction_envelope=prepared_tx,
+                network_passphrase=self.network_passphrase,
+                base_fee=sim_resp.min_resource_fee + 10_000,
+            )
+            fee_bump_tx.sign(sponsor)
+
+            # send
+            resp = self.server.send_transaction(fee_bump_tx)
+            return resp
+
+        except Exception as e:
+            logger.error(f"invocation failed: {str(e)}")
+            raise
 
     async def _query(self, function_name: str, args: list, caller, project_id) -> Dict[str, Any]:
         loop = asyncio.get_event_loop()
