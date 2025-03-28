@@ -23,6 +23,7 @@ def activate_wallet(account_private: str):
         # load the contract owner's wallet
         contract_owner_seed = os.getenv("STELLAR_CONTRACT_OWNER_SEED_PHRASE")
         if not contract_owner_seed:
+            logger.error("stellar_contract_owner_seed_phrase is not set in the environment.")
             raise ValueError("stellar_contract_owner_seed_phrase is not set in the environment.")
 
         decrypted_seed = Contract.decrypt_key(contract_owner_seed)
@@ -86,9 +87,9 @@ def activate_wallet(account_private: str):
 
             # send test asset
             faucet.send_chats_usdc(
-                recipient_public=account_keypair.public_key, recipient_secret=account_keypair.secret, amount=10000, has_trustline=True
+                recipient_public=account_keypair.public_key, recipient_secret=account_keypair.secret, amount=100, has_trustline=True
             )
-            logger.info(f"sent 10000 ChatsUSDC to {account_keypair.public_key}")
+            logger.info(f"sent 100 ChatsUSDC to {account_keypair.public_key}")
 
     except NotFoundError as e:
         logger.error(f"account not found: {e}")

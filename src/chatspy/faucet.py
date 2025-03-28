@@ -54,6 +54,7 @@ class StellarFaucet:
                 from .ccrypto import Contract
                 contract_owner_seed = os.getenv("STELLAR_CONTRACT_OWNER_SEED_PHRASE")
                 if not contract_owner_seed:
+                    logger.error("stellar_contract_owner_seed_phrase is not set in the environment.")
                     raise ValueError("stellar_contract_owner_seed_phrase is not set in the environment.")
 
                 decrypted_seed = Contract.decrypt_key(contract_owner_seed)
