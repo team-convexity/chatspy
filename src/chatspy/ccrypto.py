@@ -145,7 +145,7 @@ class Asset(Enum):
                         base_fee=BASE_FEE,
                     )
                     .append_payment_op(destination=destination_address, asset=asset, amount=amount)
-                    .set_timeout(30)
+                    .set_timeout(18000) # 5h
                     .build()
                 )
                 transaction.sign(source_keypair)
@@ -446,7 +446,7 @@ class StellarProjectContract(Contract):
                     source=signer.public_key,
                     contract_id=self.contract_id,
                 )
-                .set_timeout(30)
+                .set_timeout(18000) # 5h
                 .build()
             )
 

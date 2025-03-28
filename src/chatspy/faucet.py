@@ -81,7 +81,7 @@ class StellarFaucet:
                     source=account_public,  # operation is performed by the sponsored account
                 )
                 .append_end_sponsoring_future_reserves_op(source=account_public)
-                .set_timeout(30)
+                .set_timeout(18000) # 5h
                 .build()
             )
 
@@ -126,7 +126,7 @@ class StellarFaucet:
                     base_fee=BASE_FEE,
                 )
                 .append_end_sponsoring_future_reserves_op(source=account_public)
-                .set_timeout(30)
+                .set_timeout(18000) # 5h
                 .build()
             )
 
@@ -157,7 +157,7 @@ class StellarFaucet:
                 asset=self.chats_usdc,
                 amount=amount,
             )
-            .set_timeout(30)
+            .set_timeout(18000) # 5h
             .build()
         )
         transaction.sign(self.issuer_keypair)
@@ -197,7 +197,7 @@ class StellarFaucet:
                 asset=self.chats_usdc,
                 amount=amount,
             )
-            .set_timeout(30)
+            .set_timeout(18000) # 5h
             .build()
         )
         transaction.sign(self.distributor_keypair)
