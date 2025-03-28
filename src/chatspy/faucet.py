@@ -75,13 +75,13 @@ class StellarFaucet:
                     network_passphrase=self.network_passphrase,
                     base_fee=BASE_FEE,
                 )
+                .set_timeout(18000) # 5h
                 .append_begin_sponsoring_future_reserves_op(sponsored_id=account_public)
                 .append_change_trust_op(
                     asset=asset,
                     source=account_public,  # operation is performed by the sponsored account
                 )
                 .append_end_sponsoring_future_reserves_op(source=account_public)
-                .set_timeout(18000) # 5h
                 .build()
             )
 
@@ -125,8 +125,8 @@ class StellarFaucet:
                     network_passphrase=self.network_passphrase,
                     base_fee=BASE_FEE,
                 )
-                .append_end_sponsoring_future_reserves_op(source=account_public)
                 .set_timeout(18000) # 5h
+                .append_end_sponsoring_future_reserves_op(source=account_public)
                 .build()
             )
 
@@ -152,12 +152,12 @@ class StellarFaucet:
                 network_passphrase=self.network_passphrase,
                 base_fee=BASE_FEE,
             )
+            .set_timeout(18000) # 5h
             .append_payment_op(
                 destination=self.distributor_public,
                 asset=self.chats_usdc,
                 amount=amount,
             )
-            .set_timeout(18000) # 5h
             .build()
         )
         transaction.sign(self.issuer_keypair)
@@ -192,12 +192,12 @@ class StellarFaucet:
                 network_passphrase=self.network_passphrase,
                 base_fee=BASE_FEE,
             )
+            .set_timeout(18000) # 5h
             .append_payment_op(
                 destination=recipient_public,
                 asset=self.chats_usdc,
                 amount=amount,
             )
-            .set_timeout(18000) # 5h
             .build()
         )
         transaction.sign(self.distributor_keypair)

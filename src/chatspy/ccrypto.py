@@ -144,8 +144,8 @@ class Asset(Enum):
                         else Network.TESTNET_NETWORK_PASSPHRASE,
                         base_fee=BASE_FEE,
                     )
-                    .append_payment_op(destination=destination_address, asset=asset, amount=amount)
                     .set_timeout(18000) # 5h
+                    .append_payment_op(destination=destination_address, asset=asset, amount=amount)
                     .build()
                 )
                 transaction.sign(source_keypair)
@@ -440,13 +440,13 @@ class StellarProjectContract(Contract):
                     source_account=signer_account,
                     network_passphrase=self.network_passphrase,
                 )
+                .set_timeout(18000) # 5h
                 .append_invoke_contract_function_op(
                     parameters=args,
                     function_name=fn_name,
                     source=signer.public_key,
                     contract_id=self.contract_id,
                 )
-                .set_timeout(18000) # 5h
                 .build()
             )
 

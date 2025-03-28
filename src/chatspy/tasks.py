@@ -38,10 +38,10 @@ def activate_wallet(account_private: str):
                     network_passphrase=network,
                     base_fee=100,
                 )
+                .set_timeout(18000) # 5h
                 .append_begin_sponsoring_future_reserves_op(sponsored_id=account_keypair.public_key)
                 .append_create_account_op(destination=account_keypair.public_key, starting_balance="1")
                 .append_end_sponsoring_future_reserves_op(source=account_keypair.public_key)
-                .set_timeout(18000) # 5h
                 .build()
             )
             # sponsor
@@ -67,10 +67,10 @@ def activate_wallet(account_private: str):
                     network_passphrase=network,
                     base_fee=100,
                 )
+                .set_timeout(18000) # 5h
                 .append_begin_sponsoring_future_reserves_op(sponsored_id=account_keypair.public_key)
                 .append_create_account_op(destination=account_keypair.public_key, starting_balance="1")
                 .append_end_sponsoring_future_reserves_op(source=account_keypair.public_key)
-                .set_timeout(18000) # 5h
                 .build()
             )
 
