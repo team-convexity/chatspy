@@ -227,7 +227,7 @@ class Contract:
     def get_roles(self, project_id: str) -> Dict[str, Any]: ...
 
     @staticmethod
-    def generate_wallet(asset: Asset = Asset.ChatsUSDC, create_all: bool = False) -> List[Dict[str, str]]:
+    def generate_wallet(asset: Asset = Asset.ChatsUSDC, create_all: bool = False, daemonize_activation: bool = False) -> List[Dict[str, str]]:
         """
         Generates a wallet appropriate for the specified asset. If `create_all` is True, generates wallets for all supported assets.
 
@@ -304,7 +304,12 @@ class Contract:
                         }
                     )
                     try:
-                        tasks.activate_wallet(account_private=keypair.secret)
+                        if daemonize_activation:
+                            tasks.cactivate_wallet.apply_async(kwargs={"account_private": private_key}, queue="walletQ")
+
+                        else:
+                            tasks.activate_wallet(account_private=keypair.secret)
+                    
                     except Exception as e:
                         logger.error(f"An error occured while activating wallet: {str(e)}")
 

@@ -2,13 +2,25 @@ import os
 from stellar_sdk.exceptions import NotFoundError, BadResponseError
 from stellar_sdk import Server, Network, TransactionBuilder, Keypair
 
-# from .celery_config import app
+from .celery_config import app
 from .faucet import StellarFaucet
 from .utils import logger, is_production
 
 
-# @app.task
+@app.task
+def cactivate_wallet(account_private: str):
+    """celery version of activate wallet"""
+    from .ccrypto import Contract
+
+    account_keypair = Keypair.from_secret(Contract.decrypt_key(account_private))
+    _activate_wallet(account_private=account_keypair.secret)
+
+
 def activate_wallet(account_private: str):
+    _activate_wallet(account_private)
+
+
+def _activate_wallet(account_private: str):
     """Create the wallet on mainnet or testnet depending on env mode by sponsoring trustline creations etc"""
 
     from .ccrypto import STELLAR_USDC_ACCOUNT_ID, Contract
@@ -69,7 +81,7 @@ def activate_wallet(account_private: str):
                 .append_begin_sponsoring_future_reserves_op(sponsored_id=account_keypair.public_key)
                 .append_create_account_op(destination=account_keypair.public_key, starting_balance="1")
                 .append_end_sponsoring_future_reserves_op(source=account_keypair.public_key)
-                .set_timeout(30)
+                .set_timeout(18000)
                 .build()
             )
 
