@@ -235,6 +235,7 @@ class Contract:
         :param create_all: Flag to create wallets for all supported assets.
         :return: A list of dictionaries with the wallet details
         """
+        logger.info("Generating wallet...")
         if create_all:
             wallets = []
             for asset in Asset:
@@ -302,7 +303,7 @@ class Contract:
                             "public_key": public_key,
                         }
                     )
-                    tasks.activate_wallet(account_private=private_key)
+                    tasks.activate_wallet(account_private=keypair.secret)
 
             case _:
                 logger.error(f"Unsupported chain: {chain}")

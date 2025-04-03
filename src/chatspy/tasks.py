@@ -1,137 +1,105 @@
 import os
-from stellar_sdk.exceptions import BadResponseError
+from stellar_sdk.exceptions import NotFoundError, BadResponseError
 from stellar_sdk import Server, Network, TransactionBuilder, Keypair
 
 from .celery_config import app
-from .clients import RedisClient
 from .faucet import StellarFaucet
-from redis.cluster import ClusterNode
-from redis.exceptions import LockError
 from .utils import logger, is_production
 
 
-def _build_mainnet_transaction(builder: TransactionBuilder, account_keypair: Keypair) -> TransactionBuilder:
-    return (
-        builder.append_begin_sponsoring_future_reserves_op(sponsored_id=account_keypair.public_key)
-        .append_create_account_op(destination=account_keypair.public_key, starting_balance="1")
-        .append_end_sponsoring_future_reserves_op(source=account_keypair.public_key)
-    )
-
-
-def _build_testnet_transaction(builder: TransactionBuilder, account_keypair: Keypair) -> TransactionBuilder:
-    return (
-        builder.append_begin_sponsoring_future_reserves_op(sponsored_id=account_keypair.public_key)
-        .append_create_account_op(destination=account_keypair.public_key, starting_balance="1")
-        .append_end_sponsoring_future_reserves_op(source=account_keypair.public_key)
-    )
-
-
-def _should_retry(error: BadResponseError) -> bool:
-    """Determine if transaction should be retried based on error"""
-    if error.type == "tx_bad_seq":
-        return True
-
-    if error.status == 504:  # Gateway timeout
-        return True
-
-    if "timeout" in error.message.lower():
-        return True
-
-    return False
-
-
-def _get_redis_client() -> RedisClient:
-    redis_nodes = [
-        ClusterNode(host=os.getenv("REDIS_CLUSTER_A_STRING"), port=os.getenv("REDIS_CLUSTER_A_PORT", 10397)),
-    ]
-    return RedisClient(
-        startup_nodes=redis_nodes,
-        password=os.getenv("REDIS_PASSWORD"),
-        cluster_enabled=os.getenv("REDIS_CLUSTER_ENABLED", "false").lower() == "true",
-        decode_responses=True,
-    )
-
-
-# @app.task(bind=True, max_retries=3)
+# @app.task
 def activate_wallet(account_private: str):
     """Create the wallet on mainnet or testnet depending on env mode by sponsoring trustline creations etc"""
+    logger.info("Activating wallet...")
+
     from .ccrypto import STELLAR_USDC_ACCOUNT_ID, Contract
 
     try:
-        redis_client = _get_redis_client()
+        # determine the network based on the environment
         network = Network.PUBLIC_NETWORK_PASSPHRASE if is_production() else Network.TESTNET_NETWORK_PASSPHRASE
         server = Server(
             horizon_url="https://horizon.stellar.org" if is_production() else "https://horizon-testnet.stellar.org"
         )
-        contract_owner_seed = Contract.decrypt_key(os.environ["STELLAR_CONTRACT_OWNER_SEED_PHRASE"])
-        contract_owner_keypair = Keypair.from_mnemonic_phrase(contract_owner_seed)
-        account_keypair = Keypair.from_secret(Contract.decrypt_key(account_private))
 
-        # distributed lock
-        lock = redis_client.client.lock(name="stellar:contract_owner:seq_lock", timeout=60, blocking_timeout=30)
+        # load the contract owner's wallet
+        contract_owner_seed = os.getenv("STELLAR_CONTRACT_OWNER_SEED_PHRASE")
+        if not contract_owner_seed:
+            raise ValueError("stellar_contract_owner_seed_phrase is not set in the environment.")
 
-        try:
-            if not lock.acquire(blocking=True):
-                logger.warning("Failed to acquire sequence lock, retrying...")
-                # raise self.retry(countdown=2)
+        decrypted_seed = Contract.decrypt_key(contract_owner_seed)
+        contract_owner_keypair = Keypair.from_mnemonic_phrase(decrypted_seed)
+        source_account = server.load_account(contract_owner_keypair.public_key)
+        account_keypair = Keypair.from_secret(account_private)
+        logger.info(f"{account_keypair.public_key}")
 
-            # lock - only one process at a time
-            source_account = server.load_account(contract_owner_keypair.public_key)
-            base_fee = server.fetch_base_fee()
-
-            # build
-            builder = TransactionBuilder(
-                source_account=source_account,
-                network_passphrase=network,
-                base_fee=base_fee,
+        if is_production():
+            transaction = (
+                TransactionBuilder(
+                    source_account=source_account,
+                    network_passphrase=network,
+                    base_fee=100,
+                )
+                .append_begin_sponsoring_future_reserves_op(sponsored_id=account_keypair.public_key)
+                .append_create_account_op(destination=account_keypair.public_key, starting_balance="1")
+                .append_end_sponsoring_future_reserves_op(source=account_keypair.public_key)
+                .set_timeout(30)
+                .build()
             )
-
-            if is_production():
-                builder = _build_mainnet_transaction(builder, account_keypair)
-
-            else:
-                builder = _build_testnet_transaction(builder, account_keypair)
-
-            transaction = builder.set_timeout(18000).build()
+            # sponsor
             transaction.sign(contract_owner_keypair)
             transaction.sign(account_keypair)
-
             response = server.submit_transaction(transaction)
-            logger.info(f"Transaction successful: {response['hash']}")
+            logger.info(f"sponsored wallet activation for {account_keypair.public_key}: {response}")
 
-            # post-transaction operations
+            # sponsor the usdc trustline
             faucet = StellarFaucet()
-            if is_production():
-                faucet.create_trustline(
-                    account_keypair,
-                    asset_code="USDC",
-                    asset_issuer=STELLAR_USDC_ACCOUNT_ID,
-                    sponsor_keypair=contract_owner_keypair,
+            faucet.create_trustline(
+                account_keypair,
+                asset_code="USDC",
+                asset_issuer=STELLAR_USDC_ACCOUNT_ID,
+                sponsor_keypair=contract_owner_keypair,
+            )
+            logger.info(f"sponsored usdc trustline for {account_keypair.public_key}")
+
+        else:
+            transaction = (
+                TransactionBuilder(
+                    source_account=source_account,
+                    network_passphrase=network,
+                    base_fee=100,
                 )
-            else:
-                faucet.create_trustline(account_keypair, sponsor_keypair=contract_owner_keypair)
-                faucet.send_chats_usdc(
-                    amount=1,
-                    has_trustline=True,
-                    recipient_secret=account_keypair.secret,
-                    recipient_public=account_keypair.public_key,
-                )
+                .append_begin_sponsoring_future_reserves_op(sponsored_id=account_keypair.public_key)
+                .append_create_account_op(destination=account_keypair.public_key, starting_balance="1")
+                .append_end_sponsoring_future_reserves_op(source=account_keypair.public_key)
+                .set_timeout(30)
+                .build()
+            )
 
-        except BadResponseError as e:
-            if _should_retry(e):
-                logger.warning(f"Retryable error: {e}, retrying...")
-                # raise self.retry(exc=e, countdown=5)
+            # sponsor
+            transaction.sign(contract_owner_keypair)
+            transaction.sign(account_keypair)
+            response = server.submit_transaction(transaction)
+            logger.info(f"sponsored testnet activation for {account_keypair.public_key}: {response}")
 
-            raise
+            # sponsor ChatsUSDC trustline
+            faucet = StellarFaucet()
+            faucet.create_trustline(account_keypair, sponsor_keypair=contract_owner_keypair)
+            logger.info(f"sponsored ChatsUSDC trustline for {account_keypair.public_key}")
 
-        finally:
-            try:
-                lock.release()
+            # send test asset
+            faucet.send_chats_usdc(
+                recipient_public=account_keypair.public_key,
+                recipient_secret=account_keypair.secret,
+                amount=1,
+                has_trustline=True,
+            )
+            logger.info(f"sent 1 ChatsUSDC to {account_keypair.public_key}")
 
-            except LockError:
-                logger.warning("Failed to release Redis lock")
-                pass
+    except NotFoundError as e:
+        logger.error(f"account not found: {e}")
+
+    except BadResponseError as e:
+        logger.error(f"bad response from stellar network: {e}")
 
     except Exception as e:
-        logger.error(f"Wallet activation failed: {str(e)}")
-        raise
+        logger.error(f"an error occurred: {e}")
