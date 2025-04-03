@@ -2,7 +2,7 @@ import os
 from stellar_sdk.exceptions import NotFoundError, BadResponseError
 from stellar_sdk import Server, Network, TransactionBuilder, Keypair
 
-from .celery_config import app
+# from .celery_config import app
 from .faucet import StellarFaucet
 from .utils import logger, is_production
 
@@ -10,7 +10,6 @@ from .utils import logger, is_production
 # @app.task
 def activate_wallet(account_private: str):
     """Create the wallet on mainnet or testnet depending on env mode by sponsoring trustline creations etc"""
-    logger.info("Activating wallet...")
 
     from .ccrypto import STELLAR_USDC_ACCOUNT_ID, Contract
 
@@ -30,7 +29,6 @@ def activate_wallet(account_private: str):
         contract_owner_keypair = Keypair.from_mnemonic_phrase(decrypted_seed)
         source_account = server.load_account(contract_owner_keypair.public_key)
         account_keypair = Keypair.from_secret(account_private)
-        logger.info(f"{account_keypair.public_key}")
 
         if is_production():
             transaction = (

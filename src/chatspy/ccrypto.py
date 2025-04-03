@@ -303,7 +303,10 @@ class Contract:
                             "public_key": public_key,
                         }
                     )
-                    tasks.activate_wallet(account_private=keypair.secret)
+                    try:
+                        tasks.activate_wallet(account_private=keypair.secret)
+                    except Exception as e:
+                        logger.error(f"An error occured while activating wallet: {str(e)}")
 
             case _:
                 logger.error(f"Unsupported chain: {chain}")
