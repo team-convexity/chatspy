@@ -52,9 +52,9 @@ def _get_redis_client() -> RedisClient:
     )
 
 
-@app.task(bind=True, max_retries=3)
-def activate_wallet(self, account_private: str):
-    """Create wallet with sponsored transactions using sequence locking"""
+# @app.task(bind=True, max_retries=3)
+def activate_wallet(account_private: str):
+    """Create the wallet on mainnet or testnet depending on env mode by sponsoring trustline creations etc"""
     from .ccrypto import STELLAR_USDC_ACCOUNT_ID, Contract
 
     try:
@@ -73,7 +73,7 @@ def activate_wallet(self, account_private: str):
         try:
             if not lock.acquire(blocking=True):
                 logger.warning("Failed to acquire sequence lock, retrying...")
-                raise self.retry(countdown=2)
+                # raise self.retry(countdown=2)
 
             # lock - only one process at a time
             source_account = server.load_account(contract_owner_keypair.public_key)
@@ -120,7 +120,7 @@ def activate_wallet(self, account_private: str):
         except BadResponseError as e:
             if _should_retry(e):
                 logger.warning(f"Retryable error: {e}, retrying...")
-                raise self.retry(exc=e, countdown=5)
+                # raise self.retry(exc=e, countdown=5)
 
             raise
 

@@ -144,7 +144,7 @@ class Asset(Enum):
                         else Network.TESTNET_NETWORK_PASSPHRASE,
                         base_fee=BASE_FEE,
                     )
-                    .set_timeout(18000) # 5h
+                    .set_timeout(18000)  # 5h
                     .append_payment_op(destination=destination_address, asset=asset, amount=amount)
                     .build()
                 )
@@ -302,7 +302,7 @@ class Contract:
                             "public_key": public_key,
                         }
                     )
-                    tasks.activate_wallet.apply_async(kwargs={"account_private": private_key}, queue="walletQ")
+                    tasks.activate_wallet(account_private=private_key)
 
             case _:
                 logger.error(f"Unsupported chain: {chain}")
@@ -440,7 +440,7 @@ class StellarProjectContract(Contract):
                     source_account=signer_account,
                     network_passphrase=self.network_passphrase,
                 )
-                .set_timeout(18000) # 5h
+                .set_timeout(18000)  # 5h
                 .append_invoke_contract_function_op(
                     parameters=args,
                     function_name=fn_name,

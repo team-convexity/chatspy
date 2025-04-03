@@ -32,7 +32,7 @@ class CeleryConfig:
                 # Queue("notificationQ", Exchange("notificationQ"), routing_key="notificationQ"),
             ),
             "task_routes": {
-                "core.tasks.activate_wallet": {"queue": "walletQ"},
+                # "core.tasks.activate_wallet": {"queue": "walletQ"},
                 "core.tasks.send_email": {"queue": "low_priority"},
                 "core.tasks.create_project_wallets":  {"queue": "walletQ"},
                 "core.models.send_sms_tokens_async": {"queue": "walletQ"},
