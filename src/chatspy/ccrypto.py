@@ -692,10 +692,10 @@ class StellarProjectContract(Contract):
         entry = self.server.get_ledger_entry(key)
         return Allowance(amount=entry.data.get("amount", 0), expiry=entry.data.get("expiry"))
 
-    def get_total_cash_allowance(self, beneficiary: str, project_ids: List[str]) -> int:
+    async def get_total_cash_allowance(self, beneficiary: str, project_ids: List[str]) -> int:
         caller = StellarKeypair.from_public_key(beneficiary)
         args = [Address(beneficiary), scval.to_vec(project_ids)]
-        return self._query("get_total_cash_allowance", args, caller, project_id=project_ids[0])
+        return await self._query("get_total_cash_allowance", args, caller, project_id=project_ids[0])
 
     def get_roles(self, project_id: str) -> Roles:
         """Retrieve role assignments for a project"""
