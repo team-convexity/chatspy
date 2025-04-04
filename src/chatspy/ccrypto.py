@@ -695,7 +695,7 @@ class StellarProjectContract(Contract):
     def get_total_cash_allowance(self, beneficiary: str, project_ids: List[str]) -> int:
         caller = StellarKeypair.from_public_key(beneficiary)
         args = [Address(beneficiary), scval.to_vec(project_ids)]
-        return self._query("get_total_cash_allowance", args, caller)
+        return self._query("get_total_cash_allowance", args, caller, project_id=project_ids[0])
 
     def get_roles(self, project_id: str) -> Roles:
         """Retrieve role assignments for a project"""
