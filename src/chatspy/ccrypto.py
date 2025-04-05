@@ -3,7 +3,7 @@ import asyncio
 import secrets
 from enum import Enum
 from dataclasses import dataclass
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Literal
 
 import boto3
 from eth_keys import keys
@@ -383,10 +383,27 @@ class SorbanResultParser:
         if response.results:
             for result in response.results:
                 if result.xdr:
-                    sc_val = xdr.SCVal.from_xdr(result.xdr)
-                    allowances = self._extract_allowances(sc_val)
+                    sc_value = xdr.SCVal.from_xdr(result.xdr)
+                    allowances = self._extract_allowances(sc_value)
                     data["allowances"] = {project_id: allowances}
 
+        if response.events:
+            data["events"] = self._parse_events(response.events)
+
+        return data
+    
+    def parse_balance(self, response: soroban_rpc.SimulateTransactionResponse):
+        data = {"balance": 0}
+        if response.results:
+            balances = []
+            for result in response.results:
+                if result.xdr:
+                    sc_value = xdr.SCVal.from_xdr(result.xdr)
+                    balances.append(scval.to_native(sc_value))
+
+            if balances:
+                data["balance"] = sum(balances)
+            
         if response.events:
             data["events"] = self._parse_events(response.events)
 
@@ -483,7 +500,7 @@ class StellarProjectContract(Contract):
             logger.error(f"invocation failed: {str(e)}")
             raise
 
-    async def _query(self, function_name: str, args: list, caller, project_id) -> Dict[str, Any]:
+    async def _query(self, function_name: str, args: list, caller, project_id, result_type: Literal["allowances", "balance"] = "allowances") -> Dict[str, Any]:
         loop = asyncio.get_event_loop()
         trx_args = (
             TransactionBuilder(
@@ -500,7 +517,11 @@ class StellarProjectContract(Contract):
             .build()
         )
         response = await loop.run_in_executor(None, self.server.simulate_transaction, trx_args)
-        return self.parser.parse_allowances(response, project_id)
+        if result_type == "allowances":
+            return self.parser.parse_allowances(response, project_id)
+        
+        elif result_type == "balance":
+            return self.parser.parse_balance(response)
 
     def initialize(self, owner: StellarKeypair) -> Dict[str, Any]:
         """Initialize the contract with an owner address"""
@@ -692,10 +713,10 @@ class StellarProjectContract(Contract):
         entry = self.server.get_ledger_entry(key)
         return Allowance(amount=entry.data.get("amount", 0), expiry=entry.data.get("expiry"))
 
-    async def get_total_cash_allowance(self, beneficiary: str, project_ids: List[str]) -> int:
-        caller = StellarKeypair.from_public_key(beneficiary)
-        args = [Address(beneficiary), scval.to_vec(project_ids)]
-        return await self._query("get_total_cash_allowance", args, caller, project_id=project_ids[0])
+    async def get_total_cash_allowance(self, beneficiary: str, caller: StellarKeypair, project_ids: list[str]) -> int:
+        projects = [scval.to_string(id) for id in project_ids]
+        args = [scval.to_address(beneficiary), scval.to_vec(projects)]
+        return await self._query("get_total_cash_allowance", args, caller, project_id=project_ids[0], result_type="balance")
 
     def get_roles(self, project_id: str) -> Roles:
         """Retrieve role assignments for a project"""
@@ -732,9 +753,9 @@ class StellarProjectContract(Contract):
             [
                 scval.to_address(caller_keypair.public_key),
                 scval.to_string(project_id),
-                scval.to_address(vendor) if vendor else scval.to_void(),
                 scval.to_string(currency),
                 scval.to_uint64(int(amount * (10**7))),
+                scval.to_address(vendor) if vendor else scval.to_void(),
             ],
             caller_keypair,
         )
