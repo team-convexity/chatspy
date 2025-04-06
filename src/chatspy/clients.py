@@ -912,3 +912,6 @@ class TermiClient(SMSClient):
             payload["media"] = {"url": media_url, "caption": media_caption}
 
         return self.post("sms/send", payload)
+
+
+class TwilioClient(SMSClient): ...
