@@ -11,7 +11,7 @@ from enum import Enum, auto
 from collections import defaultdict
 from datetime import datetime, timezone
 from dataclasses import dataclass, asdict
-from typing import Literal, Optional, Union, List, Dict, Any
+from typing import Literal, Optional, Union, Dict, Any
 
 import redis
 import requests
@@ -110,14 +110,14 @@ class NotificationPayload:
     """
 
     # recipient auth user IDs or a list of Email strings
-    recipients: List[str]  # recipicients' auth user IDs or email strings.
+    recipients: list[str]  # recipicients' auth user IDs or email strings.
 
     # notification content
     # when sending SMS, the notification service will only use title (discarding body)
     title: str
 
     # channel-specific configurations
-    channels: List[NotificationChannel]
+    channels: list[NotificationChannel]
 
     # metadata and routing
     priority: int = 3  # default priority (1-5 scale, 1 being highest)
@@ -197,7 +197,7 @@ class RedisClient:
         """
         Initialize Redis Cluster connection
 
-        :param startup_nodes: List of initial cluster nodes
+        :param startup_nodes: list of initial cluster nodes
         :param decode_responses: Convert responses to strings
         :param skip_full_coverage_check: Helps with partial cluster setups
         :password: password
@@ -520,15 +520,14 @@ class Services:
     @staticmethod
     def initialize_soroban():
         from .ccrypto import StellarProjectContract
+
         contract = os.getenv("STELLAR_CONTRACT_ID")
         if not contract:
             raise ValueError("Cannot initialize stellar contract client; STELLAR_CONTRACT_ID env not found")
 
         rpc = os.getenv("STELLAR_CONTRACT_RPC_URL")
         network_phrase = os.getenv("STELLAR_CONTRACT_NETWORK_PASSPHRASE")
-        return StellarProjectContract(
-            contract_id=contract, network_passphrase=network_phrase, rpc_url=rpc
-        )
+        return StellarProjectContract(contract_id=contract, network_passphrase=network_phrase, rpc_url=rpc)
 
     @classmethod
     def initialize_clients(
@@ -626,7 +625,7 @@ class Services:
                 cls.clients["producer"] = cls.clients["kafka"].create_producer(bufferd_producer=buffer)
 
                 return cls.clients["producer"]
-            
+
             case ClientType.STELLAR_CONTRACT.value:
                 client = cls.initialize_soroban()
                 cls.clients[ClientType.STELLAR_CONTRACT.value] = client
@@ -810,3 +809,106 @@ class PaystackPaymentClient(PaymentClient):
     @staticmethod
     def calculate_hmac(data: bytes, secret: str) -> str:
         return hmac.new(secret.encode("utf-8"), data, digestmod=hashlib.sha512).hexdigest()
+
+
+class SMSClient:
+    """Base SMS client class providing common interface for SMS services."""
+
+    def __init__(self) -> None: ...
+    def post(self, endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Mmake authenticated API calls to the client.
+
+        Args:
+            endpoint: API endpoint (e.g., "sms/send")
+            payload: Dictionary of parameters to send
+
+        Returns:
+            API response as dictionary
+
+        Raises:
+            requests.exceptions.HTTPError: If API request fails
+        """
+        raise NotImplementedError("subclasses must implement post method")
+
+    def send_sms(
+        self,
+        message: str,
+        source: str,
+        phone: Union[str, list[str]],
+        type: str = "plain",
+        channel: Literal["dnd", "whatsapp", "generic"] = "generic",
+    ) -> Dict[str, Any]:
+        """
+        Base method for sending SMS messages.
+
+        Args:
+            phone: Recipient phone number(s) in international format
+            message: Text message content
+            source: Sender ID or phone number
+            channel: Delivery channel (dnd, whatsapp, generic)
+            type: Message type (plain, etc.)
+
+        Returns:
+            Dictionary containing API response
+
+        """
+        raise NotImplementedError("subclasses must implement send_sms method")
+
+
+class TermiClient(SMSClient):
+    def __init__(self) -> None:
+        self.api_key = os.getenv("TERMII_API_KEY")
+        self.base_url = os.getenv("TERMII_BASE_URL")
+        self.api_secret = os.getenv("TERMII_API_SECRET")
+
+        if not self.base_url or not self.api_key:
+            raise ValueError("Missing required environment variables. Please set TERMII_BASE_URL and TERMII_API_KEY")
+
+        self.base_url = self.base_url.rstrip("/")
+        self.headers = {"Content-Type": "application/json"}
+
+    def post(self, endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        url = f"{self.base_url}/{endpoint.lstrip('/')}"
+        authenticated_payload = payload.copy()
+        authenticated_payload["api_key"] = self.api_key
+        if self.api_secret:
+            authenticated_payload["api_secret"] = self.api_secret
+
+        response = requests.post(url, headers=self.headers, json=authenticated_payload)
+        response.raise_for_status()
+        return response.json()
+
+    def send_sms(
+        self,
+        phone: Union[str, list[str]],
+        message: str,
+        source: str,
+        channel: Literal["dnd", "whatsapp", "generic"] = "generic",
+        type: str = "plain",
+        media_url: Optional[str] = None,
+        media_caption: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Send SMS/MMS message through Termii API"""
+
+        if not phone or not message or not source:
+            raise ValueError("phone, message, and source parameters are required")
+
+        if isinstance(source, str) and len(source) > 11:
+            raise ValueError("Sender ID must be 11 characters or less")
+
+        recipients = [phone] if isinstance(phone, str) else phone
+        payload = {
+            "to": recipients,
+            "type": type,
+            "from": source,
+            "sms": message,
+            "channel": channel,
+        }
+
+        if media_url or media_caption:
+            if not (media_url and media_caption):
+                raise ValueError("Both media_url and media_caption required for MMS")
+            payload["media"] = {"url": media_url, "caption": media_caption}
+
+        return self.post("sms/send", payload)

@@ -3,7 +3,7 @@ import asyncio
 import secrets
 from enum import Enum
 from dataclasses import dataclass
-from typing import List, Optional, Dict, Any, Tuple, Literal
+from typing import Optional, Dict, Any, Tuple, Literal
 
 import boto3
 from eth_keys import keys
@@ -55,11 +55,11 @@ class Allowance:
 
 @dataclass
 class Roles:
-    super_admins: List[str]
-    admins: List[str]
-    ngos: List[str]
-    vendors: List[str]
-    beneficiaries: List[str]
+    super_admins: list[str]
+    admins: list[str]
+    ngos: list[str]
+    vendors: list[str]
+    beneficiaries: list[str]
 
 
 class Chain(Enum):
@@ -201,10 +201,10 @@ class Contract:
         self, caller: StellarKeypair, vendor: str, project_id: str, item_id: str, quantity: int
     ) -> Dict[str, Any]: ...
     def allocate_cash_allowances_batch(
-        self, caller: StellarKeypair, project_id: str, allowances: List[Tuple[str, str, int, Optional[int]]]
+        self, caller: StellarKeypair, project_id: str, allowances: list[Tuple[str, str, int, Optional[int]]]
     ) -> Dict[str, Any]: ...
     def allocate_item_allowances_batch(
-        self, caller: StellarKeypair, project_id: str, allowances: List[Tuple[str, str, int, Optional[int]]]
+        self, caller: StellarKeypair, project_id: str, allowances: list[Tuple[str, str, int, Optional[int]]]
     ) -> Dict[str, Any]: ...
     def transfer_cash_allowance(
         self, caller: StellarKeypair, project_id: str, new_allowee: str, currency: str, amount: int
@@ -222,12 +222,14 @@ class Contract:
     def get_item_allowance(self, project_id: str, allowee: str, item_id: str) -> Dict[str, Any]: ...
     def get_all_cash_allowances(self, project_id: str) -> Dict[str, Any]: ...
     def get_all_item_allowances(self, project_id: str) -> Dict[str, Any]: ...
-    def get_total_cash_allowance(self, beneficiary: str, project_ids: List[str]) -> Dict[str, Any]: ...
-    def get_total_item_allowance(self, beneficiary: str, project_ids: List[str]) -> Dict[str, Any]: ...
+    def get_total_cash_allowance(self, beneficiary: str, project_ids: list[str]) -> Dict[str, Any]: ...
+    def get_total_item_allowance(self, beneficiary: str, project_ids: list[str]) -> Dict[str, Any]: ...
     def get_roles(self, project_id: str) -> Dict[str, Any]: ...
 
     @staticmethod
-    def generate_wallet(asset: Asset = Asset.ChatsUSDC, create_all: bool = False, daemonize_activation: bool = False) -> List[Dict[str, str]]:
+    def generate_wallet(
+        asset: Asset = Asset.ChatsUSDC, create_all: bool = False, daemonize_activation: bool = False
+    ) -> list[Dict[str, str]]:
         """
         Generates a wallet appropriate for the specified asset. If `create_all` is True, generates wallets for all supported assets.
 
@@ -309,7 +311,7 @@ class Contract:
 
                         else:
                             tasks.activate_wallet(account_private=keypair.secret)
-                    
+
                     except Exception as e:
                         logger.error(f"An error occured while activating wallet: {str(e)}")
 
@@ -391,7 +393,7 @@ class SorbanResultParser:
             data["events"] = self._parse_events(response.events)
 
         return data
-    
+
     def parse_balance(self, response: soroban_rpc.SimulateTransactionResponse):
         data = {"balance": 0}
         if response.results:
@@ -403,7 +405,7 @@ class SorbanResultParser:
 
             if balances:
                 data["balance"] = sum(balances)
-            
+
         if response.events:
             data["events"] = self._parse_events(response.events)
 
@@ -500,7 +502,14 @@ class StellarProjectContract(Contract):
             logger.error(f"invocation failed: {str(e)}")
             raise
 
-    async def _query(self, function_name: str, args: list, caller, project_id, result_type: Literal["allowances", "balance"] = "allowances") -> Dict[str, Any]:
+    async def _query(
+        self,
+        function_name: str,
+        args: list,
+        caller,
+        project_id,
+        result_type: Literal["allowances", "balance"] = "allowances",
+    ) -> Dict[str, Any]:
         loop = asyncio.get_event_loop()
         trx_args = (
             TransactionBuilder(
@@ -519,7 +528,7 @@ class StellarProjectContract(Contract):
         response = await loop.run_in_executor(None, self.server.simulate_transaction, trx_args)
         if result_type == "allowances":
             return self.parser.parse_allowances(response, project_id)
-        
+
         elif result_type == "balance":
             return self.parser.parse_balance(response)
 
@@ -606,7 +615,7 @@ class StellarProjectContract(Contract):
         self,
         project_id: str,
         caller_secret: str,
-        allowances: List[Tuple[str, str, int, Optional[int]]],
+        allowances: list[Tuple[str, str, int, Optional[int]]],
     ) -> Dict[str, Any]:
         """Batch create/update cash allowances"""
 
@@ -630,7 +639,7 @@ class StellarProjectContract(Contract):
         return self._invoke("allocate_cash_allowances_batch", args, caller)
 
     def allocate_item_allowances_batch(
-        self, caller: StellarKeypair, project_id: str, allowances: List[Tuple[str, str, int, Optional[int]]]
+        self, caller: StellarKeypair, project_id: str, allowances: list[Tuple[str, str, int, Optional[int]]]
     ) -> Dict[str, Any]:
         """Batch create/update item allowances"""
         args = [scval.from_string(project_id)]
@@ -716,7 +725,9 @@ class StellarProjectContract(Contract):
     async def get_total_cash_allowance(self, beneficiary: str, caller: StellarKeypair, project_ids: list[str]) -> int:
         projects = [scval.to_string(id) for id in project_ids]
         args = [scval.to_address(beneficiary), scval.to_vec(projects)]
-        return await self._query("get_total_cash_allowance", args, caller, project_id=project_ids[0], result_type="balance")
+        return await self._query(
+            "get_total_cash_allowance", args, caller, project_id=project_ids[0], result_type="balance"
+        )
 
     def get_roles(self, project_id: str) -> Roles:
         """Retrieve role assignments for a project"""
