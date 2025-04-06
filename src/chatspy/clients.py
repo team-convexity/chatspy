@@ -1,3 +1,4 @@
+import re
 import os
 import sys
 import json
@@ -854,6 +855,39 @@ class SMSClient:
 
         """
         raise NotImplementedError("subclasses must implement send_sms method")
+
+    @staticmethod
+    def format_phone_number(phone_number: str, country_code: str = "NG") -> str:
+        """
+        Format phone numbers according to country specifications, with support for extensions.
+        Currently only supports Nigeria (NG).
+        """
+        cleaned = re.sub(r"(?!^\+)[^\d]", "", str(phone_number))
+
+        if country_code.upper() == "NG":
+            if cleaned.startswith("+234"):
+                formatted = cleaned  # already in international format
+
+            elif cleaned.startswith("234"):
+                formatted = f"+{cleaned}"
+
+            elif cleaned.startswith("0"):
+                formatted = f"+234{cleaned[1:]}"
+
+            else:
+                # for numbers without prefix, we assume they're missing country code
+                if len(cleaned) == 10:
+                    formatted = f"+234{cleaned}"
+
+                else:
+                    raise ValueError(f"Invalid Nigerian phone number format: {phone_number}")
+
+            if len(formatted) != 14:
+                raise ValueError(f"Invalid Nigerian phone number length: {phone_number}")
+        else:
+            raise ValueError(f"Unsupported country code: {country_code}. Currently only 'NG' is supported")
+
+        return formatted
 
 
 class TermiClient(SMSClient):
