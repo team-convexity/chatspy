@@ -34,6 +34,7 @@ class CeleryConfig:
             "task_routes": {
                 "core.tasks.cactivate_wallet": {"queue": "walletQ"},
                 "core.tasks.send_email": {"queue": "low_priority"},
+                "core.tasks.send_sms": {"queue": "high_priority"},
                 "core.tasks.create_project_wallets":  {"queue": "walletQ"},
                 "core.models.send_sms_tokens_async": {"queue": "walletQ"},
                 # "core.tasks.retry_failed_transactions": {"queue": "low_priority"},
