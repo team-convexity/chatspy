@@ -909,6 +909,7 @@ class TermiClient(SMSClient):
         if self.api_secret:
             authenticated_payload["api_secret"] = self.api_secret
 
+        logger.i(message=f"\n\nMaking request:\n{url}\n{self.header}\n{authenticated_payload}")
         response = requests.post(url, headers=self.headers, json=authenticated_payload)
         response.raise_for_status()
         return response.json()
