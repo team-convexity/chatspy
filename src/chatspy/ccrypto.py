@@ -241,7 +241,7 @@ class Contract:
         if create_all:
             wallets = []
             for asset in Asset:
-                wallets.extend(Contract.generate_wallet(asset=asset))
+                wallets.extend(Contract.generate_wallet(asset=asset, daemonize_activation=daemonize_activation))
             return wallets
 
         chain = asset.chain
