@@ -3,7 +3,7 @@ import asyncio
 import secrets
 from enum import Enum
 from dataclasses import dataclass
-from typing import Optional, Dict, Any, Tuple, Literal
+from typing import Optional, Dict, Any, Tuple, Literal, NoReturn
 
 import boto3
 from eth_keys import keys
@@ -25,6 +25,15 @@ from stellar_sdk import (
 )
 
 from . import tasks
+from .exceptions import (
+    ErrorHandler,
+    ContractError,
+    SorobanErrorHandler,
+    ContractErrorContext,
+    FallbackErrorHandler,
+    ContractParsingError,
+    SimulationErrorHandler,
+)
 from .services import Service
 from .utils import logger, is_production
 
@@ -450,9 +459,37 @@ class StellarProjectContract(Contract):
 
         self.server = SorobanServer(self.rpc_url)
         self.parser = SorbanResultParser()
+        self.error_handler = self._create_error_handler()
+
+    def _create_error_handler(self) -> ErrorHandler:
+        # chain error handlers
+        return SorobanErrorHandler(SimulationErrorHandler(FallbackErrorHandler()))
+
+    def _handle_error(self, context: ContractErrorContext) -> NoReturn:
+        """Process error through handler chain"""
+        error = self.error_handler.handle(context)
+        if not error:
+            error = ContractError("Unknown error", context)
+
+        logger.e(
+            message=f"Contract error: {error}",
+            description=str(error.context.as_dict()),
+            service=Service.PROJECT.value,
+        )
+        raise error
+
+    def _parse_response(self, response) -> dict:
+        """Parse successful response with error isolation"""
+        try:
+            return self.parser.parse(response)
+        except Exception as e:
+            context = ContractErrorContext(function="parse_response", args=[response], raw_error=str(e))
+
+            raise ContractParsingError("Response parsing failed", context) from e
 
     def _invoke(self, fn_name: str, args: list[xdr.SCVal], signer: StellarKeypair):
         """Generic function invoker"""
+        context = None
         try:
             contract_owner_seed = os.getenv("STELLAR_CONTRACT_OWNER_SEED_PHRASE")
             if not contract_owner_seed:
@@ -479,8 +516,12 @@ class StellarProjectContract(Contract):
             )
 
             sim_resp = self.server.simulate_transaction(inner_tx)
+            context = ContractErrorContext(
+                function=fn_name, args=args, raw_error=sim_resp.error, simulation_result=sim_resp.results
+            )
+
             if sim_resp.error:
-                raise Exception(f"simulation failed: {sim_resp.error}")
+                self._handle_error(context)
 
             prepared_tx = self.server.prepare_transaction(inner_tx, sim_resp)
             prepared_tx.sign(signer)
@@ -496,11 +537,12 @@ class StellarProjectContract(Contract):
 
             # send
             resp = self.server.send_transaction(fee_bump_tx)
-            return resp
+            return self._parse_response(resp)
 
         except Exception as e:
-            logger.error(f"invocation failed: {str(e)}")
-            raise
+            if not context:
+                context = ContractErrorContext(function=fn_name, args=args, raw_error=str(e))
+            self._handle_error(context)
 
     async def _query(
         self,
