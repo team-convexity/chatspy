@@ -388,6 +388,14 @@ class SorbanResultParser:
     A class to parse results returned by Soroban smart contract queries.
     """
 
+    def parse(
+        self,
+        response: soroban_rpc.SimulateTransactionResponse | soroban_rpc.SendTransactionResponse,
+        project_id: str = None,
+    ):
+        """TODO, process different kind of responses depending on the call type (query or invoke) and call corresponding parser method"""
+        return response
+
     def parse_allowances(self, response: soroban_rpc.SimulateTransactionResponse, project_id: str) -> Dict[str, Any]:
         """Parse the response from a contract call."""
         data = {}
@@ -471,9 +479,11 @@ class StellarProjectContract(Contract):
         if not error:
             error = ContractError("Unknown error", context)
 
+        err_desc = error.context.as_dict() if error.context else error
+
         logger.e(
             message=f"Contract error: {error}",
-            description=str(error.context.as_dict()),
+            description=str(err_desc),
             service=Service.PROJECT.value,
         )
         raise error

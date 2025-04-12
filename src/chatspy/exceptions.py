@@ -87,6 +87,9 @@ class SorobanErrorHandler(ErrorHandler):
     ERROR_REGEX = re.compile(r"Error\(Contract, #(\d+)\)")
 
     def _try_handle(self, context: ContractErrorContext) -> Optional[ContractError]:
+        if not context.raw_error:
+            return None
+        
         match = self.ERROR_REGEX.search(context.raw_error)
         if not match:
             return None
