@@ -5,6 +5,7 @@ import json
 import jwt
 import dotenv
 import requests
+from stellar_sdk import Server
 from gunicorn.config import Config
 from gunicorn.glogging import Logger
 from django.http import HttpResponse
@@ -192,3 +193,8 @@ def get_currency_from_country_code(country_code, cache_client) -> str | None:
         logger.error(f"error parsing api response for {country_code}: {e}")
 
     return None
+
+
+def get_server() -> Server:
+    network = "testnet" if "production" not in os.getenv("DJANGO_SETTINGS_MODULE") else "public"
+    return Server(f"https://horizon-{network}.stellar.org")
