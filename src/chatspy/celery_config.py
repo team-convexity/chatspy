@@ -26,7 +26,7 @@ class CeleryConfig:
                 Queue("default", Exchange("default"), routing_key="default"),
                 Queue("low_priority", Exchange("low_priority"), routing_key="low_priority"),
                 Queue("high_priority", Exchange("high_priority"), routing_key="high_priority"),
-                # Queue("authQ", Exchange("authQ"), routing_key="authQ"),
+                Queue("authQ", Exchange("authQ"), routing_key="authQ"),
                 Queue("walletQ", Exchange("walletQ"), routing_key="walletQ"),
                 Queue("projectQ", Exchange("projectQ"), routing_key="projectQ"),
                 # Queue("notificationQ", Exchange("notificationQ"), routing_key="notificationQ"),
@@ -39,7 +39,7 @@ class CeleryConfig:
                 "core.tasks.set_beneficiary_role": {"queue": "walletQ"},
                 "core.tasks.retry_create_project_wallets": {"queue": "walletQ"},
                 "core.models.send_sms_tokens_async": {"queue": "walletQ"},
-                # "core.tasks.retry_failed_transactions": {"queue": "low_priority"},
+                "core.tasks.retry_failed_transactions": {"queue": "authQ"},
                 "core.tasks.process_unprocessed_donations": {"queue": "projectQ"},
             },
             # Worker settings
