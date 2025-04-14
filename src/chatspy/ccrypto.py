@@ -1,4 +1,5 @@
 import os
+import time
 import asyncio
 import secrets
 from enum import Enum
@@ -10,6 +11,7 @@ from eth_keys import keys
 from eth_account import Account
 from eth_utils import decode_hex
 from botocore.exceptions import ClientError
+from stellar_sdk.exceptions import NotFoundError
 from bitcoin import random_key, privtopub, pubtoaddr
 from stellar_sdk import (
     xdr,
@@ -35,7 +37,7 @@ from .exceptions import (
     SimulationErrorHandler,
 )
 from .services import Service
-from .utils import logger, is_production
+from .utils import logger, is_production, get_server
 
 STELLAR_USDC_ACCOUNT_ID = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"  # mainnet
 TEST_STELLAR_USDC_ACCOUNT_ID = "GBMAXTTNYNTJJCNUKZZBJLQD2ASIGZ3VBJT2HHX272LK7W4FPJCBEAYR"  # testnet.
@@ -185,6 +187,48 @@ class Asset(Enum):
     def token_standard(self) -> TokenStandard:
         """Returns the token standard if this is a token."""
         return self._token_standard
+
+    @staticmethod
+    def wait_for_transaction_confirmation(
+        chain: Chain, tx_hash: str, timeout: int = 6, poll_interval: int = 2
+    ) -> Optional[bool]:
+        """
+        Wait for transaction confirmation
+        """
+        match chain:
+            case Chain.BITCOIN:
+                ...
+            case Chain.ETHEREUM:
+                ...
+            case Chain.STELLAR:
+                try:
+                    server = get_server()
+                    start_time = time.time()
+                    while time.time() - start_time < timeout:
+                        try:
+                            tx_data = server.transactions().transaction(transaction_hash=tx_hash).call()
+                            if tx_data.get("successful", False):
+                                logger.i(message=f"Stellar tx {tx_hash[:8]} confirmed")
+                                return True
+                            logger.w(message=f"Stellar tx {tx_hash[:8]} failed")
+                            return False
+                        except NotFoundError:
+                            time.sleep(poll_interval)
+                            continue
+                        except Exception as e:
+                            logger.e(message="Stellar API error", service=Service.PROJECT.value, description=str(e))
+                            return None
+
+                    logger.w(message=f"Stellar tx {tx_hash[:8]} timeout", service=Service.PROJECT.value)
+                    return None
+
+                except Exception as e:
+                    logger.e(message="Stellar monitoring error", description=str(e), service=Service.PROJECT.value)
+                    return None
+
+            case _:
+                logger.warning(f"Unknown chain: {chain}")
+                return None
 
 
 class Contract:
