@@ -36,6 +36,7 @@ class CeleryConfig:
                 "core.tasks.send_email": {"queue": "low_priority"},
                 "core.tasks.send_sms": {"queue": "high_priority"},
                 "core.tasks.create_project_wallets": {"queue": "walletQ"},
+                "core.tasks.set_beneficiary_role": {"queue": "walletQ"},
                 "core.tasks.retry_create_project_wallets": {"queue": "walletQ"},
                 "core.models.send_sms_tokens_async": {"queue": "walletQ"},
                 # "core.tasks.retry_failed_transactions": {"queue": "low_priority"},
