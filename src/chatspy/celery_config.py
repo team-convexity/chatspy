@@ -35,6 +35,7 @@ class CeleryConfig:
                 "core.tasks.cactivate_wallet": {"queue": "walletQ"},
                 "core.tasks.send_email": {"queue": "low_priority"},
                 "core.tasks.send_sms": {"queue": "high_priority"},
+                "core.tasks.generate_codes_async": {"queue": "walletQ"},
                 "core.tasks.create_project_wallets": {"queue": "walletQ"},
                 "core.tasks.set_beneficiary_role": {"queue": "walletQ"},
                 "core.tasks.retry_create_project_wallets": {"queue": "walletQ"},
