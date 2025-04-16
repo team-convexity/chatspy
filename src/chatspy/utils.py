@@ -196,5 +196,8 @@ def get_currency_from_country_code(country_code, cache_client) -> str | None:
 
 
 def get_server() -> Server:
-    network = "testnet" if "production" not in os.getenv("DJANGO_SETTINGS_MODULE") else "public"
-    return Server(f"https://horizon-{network}.stellar.org")
+    return (
+        Server("https://horizon-testnet.stellar.org")
+        if "production" not in os.getenv("DJANGO_SETTINGS_MODULE")
+        else "https://horizon.stellar.org"
+    )
