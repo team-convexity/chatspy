@@ -10,6 +10,7 @@ class BaseResponseSchema(BaseModel):
     success: bool = True
     error: ErrorResponse | None = None
 
+
 class IdentityVerificationSchema(BaseModel):
     firstname: str
     lastname: str

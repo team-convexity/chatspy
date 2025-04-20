@@ -20,6 +20,7 @@ from requests import request
 from django.db import models
 from django.conf import settings
 from django.db import transaction
+from .schemas import ErrorResponse
 from django.db.models import ImageField
 from django.core.serializers import serialize
 from redis.cluster import RedisCluster, ClusterNode
@@ -737,6 +738,37 @@ class IdentityClient:
         """Prepare error response data object"""
         _error = dict(status=False, data={"message": str(error), "status": "failed"})
         return self.prepare_response(**_error)
+
+    @staticmethod
+    def perform_identity_check(
+        document_type: str,
+        document_number: str,
+        payload: dict,
+        client: Optional["IdentityClient"] = None,
+    ) -> dict | None:
+        response = None
+        identity = client
+
+        if not client:
+            identity: IdentityClient = Services.get_client(ClientType.IDENTITY.value)
+        match document_type:
+            case "NIN":
+                response = identity.verify_nin(document_number, payload)
+            case "BVN":
+                response = identity.verify_bvn(document_number, payload)
+            case "DRIVER_LICENSE":
+                response = identity.verify_driver_license(document_number, payload)
+            case "INTERNATIONAL_PASSPORT":
+                response = identity.verify_international_passport(document_number, payload)
+            case _:
+                return 400, ErrorResponse(message="Invalid verification type")
+
+        if response.get("message") == "Expired Session":
+            # reinitialize client and retry.
+            new_client = Services.reinitialize(ClientType.IDENTITY.value)
+            response = IdentityClient.perform_identity_check(document_type, document_number, payload, new_client)
+
+        return response
 
 
 class PaymentClient:
