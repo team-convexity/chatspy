@@ -9,6 +9,7 @@ import hashlib
 import tempfile
 import threading
 from enum import Enum, auto
+from functools import partial
 from collections import defaultdict
 from datetime import datetime, timezone
 from dataclasses import dataclass, asdict
@@ -981,3 +982,102 @@ class TermiClient(SMSClient):
 
 
 class TwilioClient(SMSClient): ...
+
+
+class EndpointBuilder:
+    """Chainable endpoint paths"""
+
+    def __init__(self, client: "BTCClient", path: str = ""):
+        self.client = client
+        self.path = path
+
+    def __getattr__(self, name: str) -> "EndpointBuilder":
+        """Handle method chaining like .transactions().for_account()"""
+        return EndpointBuilder(self.client, f"{self.path}/{name}")
+
+    def __call__(self, *args) -> "EndpointBuilder":
+        """Handle calls with arguments like .account(address)"""
+        if args:
+            self.path = f"{self.path}/{'/'.join(str(arg) for arg in args)}"
+        return self
+
+    def call(self, **params) -> Any:
+        """Execute the request"""
+        return self.client._request(self.path.lstrip("/"), params)
+
+
+class BTCClient:
+    """Support Blockstream, Mempool.space, and local RPC Node"""
+
+    def __init__(self, host: str, *, api_key: Optional[str] = None):
+        self.api_key = api_key
+        self.base_url = host.rstrip("/") + "/"
+
+        self.fees = partial(EndpointBuilder, self, "fee")
+        self.blocks = partial(EndpointBuilder, self, "block")
+        self.transactions = partial(EndpointBuilder, self, "tx")
+        self.addresses = partial(EndpointBuilder, self, "address")
+
+    def _request(self, path: str, params: Optional[dict] = None) -> Any:
+        """Generic request handler"""
+        url = f"{self.base_url}{path}"
+        headers = {"Accept": "application/json"}
+
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        try:
+            response = requests.get(url, params=params, headers=headers)
+            response.raise_for_status()
+            return response.json()
+
+        except requests.RequestException as e:
+            raise Exception(f"API request failed: {e}")
+
+    def get_fee_estimates(self) -> Dict[str, float]:
+        """
+        Get current fee estimates (sat/vByte)
+        """
+        try:
+            try:
+                # blockstream format
+                return self._request("fee-estimates")
+
+            except Exception:
+                # mempool.space
+
+                return self._request("v1/fees/recommended")
+        except Exception as e:
+            raise Exception(f"Fee estimation unavailable: {str(e)}")
+
+    def get_recommended_fee(self, target_blocks: int = 6) -> float:
+        """
+        Get recommended fee for target confirmation blocks
+        Returns sat/vByte
+        """
+        estimates = self.get_fee_estimates()
+
+        if all(isinstance(k, str) for k in estimates.keys()):
+            # blockstream format
+            return estimates.get(str(target_blocks), estimates.get("6"))
+        else:
+            # mempool.space format
+            if target_blocks <= 1:
+                return estimates.get("fastestFee", 1.0)
+
+            elif target_blocks <= 3:
+                return estimates.get("halfHourFee", 1.0)
+
+            else:
+                return estimates.get("hourFee", 1.0)
+
+    def submit_transaction(self, tx_hex: str) -> str:
+        """Broadcast transaction"""
+
+        url = f"{self.base_url}tx"
+        response = requests.post(url, data=tx_hex)
+
+        return response.json()
+
+
+class EthereumClient: ...

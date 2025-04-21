@@ -4,7 +4,7 @@ import asyncio
 import secrets
 from enum import Enum
 from dataclasses import dataclass
-from typing import Optional, Dict, Any, Tuple, Literal, NoReturn
+from typing import Optional, Dict, Any, Tuple, Literal, NoReturn, overload
 
 import boto3
 from eth_keys import keys
@@ -37,10 +37,41 @@ from .exceptions import (
     SimulationErrorHandler,
 )
 from .services import Service
-from .utils import logger, is_production, get_server
+from .clients import BTCClient, EthereumClient
+from .utils import logger, is_production
 
 STELLAR_USDC_ACCOUNT_ID = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"  # mainnet
 TEST_STELLAR_USDC_ACCOUNT_ID = "GBMAXTTNYNTJJCNUKZZBJLQD2ASIGZ3VBJT2HHX272LK7W4FPJCBEAYR"  # testnet.
+
+
+@overload
+def get_server() -> Server: ...
+
+
+@overload
+def get_server(chain: Literal["stellar"]) -> Server: ...
+
+
+@overload
+def get_server(chain: Literal["bitcoin"]) -> BTCClient: ...
+
+
+@overload
+def get_server(chain: Literal["ethereum"]) -> EthereumClient: ...
+
+
+def get_server(
+    chain: Literal["bitcoin", "ethereum", "stellar"] = "stellar",
+) -> Server | BTCClient | EthereumClient | None:
+    if chain == "stellar":
+        return Server("https://horizon-testnet.stellar.org" if not is_production() else "https://horizon.stellar.org")
+
+    elif chain == "bitcoin":
+        return BTCClient(
+            "https://blockstream.info/api/" if is_production() else "https://blockstream.info/testnet/api/"
+        )
+
+    return Server("https://horizon-testnet.stellar.org" if not is_production() else "https://horizon.stellar.org")
 
 
 def get_stellar_asset_account_id():
@@ -99,14 +130,28 @@ class Asset(Enum):
     async def get_transaction_history(address: str, chain: Chain):
         match chain:
             case Chain.BITCOIN:
-                return []
+                client = get_server(Chain.BITCOIN.value)
+                raw_txs = await asyncio.to_thread(lambda: client.transactions().address(address).call())
+                return [
+                    {
+                        "txid": tx["txid"],
+                        "block_height": tx.get("status", {}).get("block_height"),
+                        "timestamp": tx.get("status", {}).get("block_time"),
+                        "inputs": [vin["prevout"]["scriptpubkey_address"] for vin in tx["vin"] if "prevout" in vin],
+                        "outputs": [
+                            {"address": vout["scriptpubkey_address"], "value": vout["value"]} for vout in tx["vout"]
+                        ],
+                        "fee": sum(vin["prevout"]["value"] for vin in tx["vin"] if "prevout" in vin)
+                        - sum(vout["value"] for vout in tx["vout"]),
+                    }
+                    for tx in raw_txs
+                ]
 
             case Chain.ETHEREUM:
                 return []
 
             case Chain.STELLAR:
-                subdomain = "horizon." if is_production() else "horizon-testnet."
-                server = Server(horizon_url=f"https://{subdomain}stellar.org")
+                server = get_server()
                 return await asyncio.to_thread(server.transactions().for_account(address).call)
 
             case _:
@@ -115,22 +160,26 @@ class Asset(Enum):
     @staticmethod
     async def get_stellar_transaction_operations(transaction_id: str):
         """Fetch transaction operations asynchronously."""
-        subdomain = "horizon." if is_production() else "horizon-testnet."
-        server = Server(horizon_url=f"https://{subdomain}stellar.org")
+        server = get_server()
         return await asyncio.to_thread(lambda: server.operations().for_transaction(transaction_id).call())
 
     @staticmethod
     def get_balance(address: str, chain: Chain):
         match chain:
             case Chain.BITCOIN:
-                ...
-
+                client = get_server("bitcoin")
+                balance_data = client.addresses(address).call()
+                return {
+                    "confirmed": balance_data["chain_stats"]["funded_txo_sum"]
+                    - balance_data["chain_stats"]["spent_txo_sum"],
+                    "unconfirmed": balance_data["mempool_stats"]["funded_txo_sum"]
+                    - balance_data["mempool_stats"]["spent_txo_sum"],
+                }
             case Chain.ETHEREUM:
                 ...
 
             case Chain.STELLAR:
-                subdomain = "horizon." if is_production() else "horizon-testnet."
-                server = Server(horizon_url=f"https://{subdomain}stellar.org")
+                server = get_server()
                 account = server.accounts().account_id(address).call()
                 return account["balances"]
             case _:
@@ -141,8 +190,7 @@ class Asset(Enum):
         match chain:
             case Chain.STELLAR:
                 BASE_FEE = 100  # base fee, in stroops
-                subdomain = "horizon." if is_production() else "horizon-testnet."
-                server = Server(horizon_url=f"https://{subdomain}stellar.org")
+                server = get_server()
                 source_keypair = StellarKeypair.from_secret(source_secret)
                 source_account = server.load_account(source_keypair.public_key)
                 asset = get_stellar_asset()
