@@ -42,6 +42,7 @@ class CeleryConfig:
                 "core.models.requeue_disbursement_actions": {"queue": "walletQ"},
                 "core.tasks.retry_create_project_wallets": {"queue": "walletQ"},
                 "core.models.send_sms_tokens_async": {"queue": "walletQ"},
+                "core.models.process_synced_beneficiaries": {"queue": "walletQ"},
                 "core.tasks.retry_failed_transactions": {"queue": "authQ"},
                 "core.tasks.process_unprocessed_donations": {"queue": "projectQ"},
             },
