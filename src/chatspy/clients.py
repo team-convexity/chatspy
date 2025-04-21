@@ -992,18 +992,16 @@ class EndpointBuilder:
         self.path = path
 
     def __getattr__(self, name: str) -> "EndpointBuilder":
-        """Handle method chaining like .transactions().for_account()"""
         return EndpointBuilder(self.client, f"{self.path}/{name}")
 
     def __call__(self, *args) -> "EndpointBuilder":
-        """Handle calls with arguments like .account(address)"""
-        if args:
-            self.path = f"{self.path}/{'/'.join(str(arg) for arg in args)}"
-        return self
+        """Handle path arguments like .address('...')"""
+        new_path = f"{self.path}/{'/'.join(str(arg) for arg in args)}"
+        return EndpointBuilder(self.client, new_path.lstrip('/'))
 
     def call(self, **params) -> Any:
         """Execute the request"""
-        return self.client._request(self.path.lstrip("/"), params)
+        return self.client._request(self.path, params)
 
 
 class BTCClient:
@@ -1013,10 +1011,10 @@ class BTCClient:
         self.api_key = api_key
         self.base_url = host.rstrip("/") + "/"
 
-        self.fees = partial(EndpointBuilder, self, "fee")
-        self.blocks = partial(EndpointBuilder, self, "block")
-        self.transactions = partial(EndpointBuilder, self, "tx")
-        self.addresses = partial(EndpointBuilder, self, "address")
+        self.fees = EndpointBuilder(self, "fee")
+        self.blocks = EndpointBuilder(self, "block")
+        self.address = EndpointBuilder(self, "address")
+        self.transactions = EndpointBuilder(self, "tx")
 
     def _request(self, path: str, params: Optional[dict] = None) -> Any:
         """Generic request handler"""

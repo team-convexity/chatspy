@@ -168,7 +168,7 @@ class Asset(Enum):
         match chain:
             case Chain.BITCOIN:
                 client = get_server("bitcoin")
-                balance_data = client.addresses(address).call()
+                balance_data = client.address(address).call()
                 return {
                     "confirmed": balance_data["chain_stats"]["funded_txo_sum"]
                     - balance_data["chain_stats"]["spent_txo_sum"],
