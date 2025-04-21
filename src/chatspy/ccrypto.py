@@ -12,7 +12,7 @@ from eth_account import Account
 from eth_utils import decode_hex
 from botocore.exceptions import ClientError
 from stellar_sdk.exceptions import NotFoundError
-from bitcoin import random_key, privtopub, pubtoaddr
+from bitcoin import random_key, privtopub, pubtoaddr, encode_pubkey
 from stellar_sdk import (
     xdr,
     scval,
@@ -352,16 +352,18 @@ class Contract:
             case Chain.BITCOIN:
                 private_key = random_key()
                 public_key = privtopub(private_key)
-                address = pubtoaddr(public_key)
-
+                public_key_compressed = encode_pubkey(public_key, "hex_compressed")
+                address = pubtoaddr(
+                    public_key_compressed, magicbyte=0 if is_production() else 111
+                )  # 0=mainnet, 111=testnet
                 wallets.append(
                     {
                         "address": address,
                         "chain": chain.value,
                         "asset": asset.symbol,
                         "display_name": asset.display_name,
+                        "public_key": public_key_compressed,
                         "private_key": Contract.encrypt_key(private_key),
-                        "public_key": public_key,
                     }
                 )
 
