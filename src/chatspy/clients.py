@@ -1127,7 +1127,7 @@ class CurrencyConverter:
 
         rate = cls._fetch_rate(base_currency, target_currency)
         if rate:
-            cache.set(cache_key, str(rate), 86400)
+            cache.set(cache_key, str(rate), 86400) # 24h
         return rate
 
     @classmethod
