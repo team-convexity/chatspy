@@ -4,12 +4,13 @@ import sys
 import json
 import hmac
 import codecs
+import aiohttp
 import logging
 import hashlib
 import tempfile
 import threading
 from enum import Enum, auto
-from functools import partial
+from decimal import Decimal
 from collections import defaultdict
 from datetime import datetime, timezone
 from dataclasses import dataclass, asdict
@@ -22,6 +23,7 @@ from django.db import models
 from django.conf import settings
 from django.db import transaction
 from .schemas import ErrorResponse
+from django.core.cache import cache
 from django.db.models import ImageField
 from django.core.serializers import serialize
 from redis.cluster import RedisCluster, ClusterNode
@@ -51,6 +53,7 @@ class ClientType(Enum):
     REDIS = "redis"
     IDENTITY = "identity"
     STELLAR_CONTRACT = "stellar_contract"
+    CURRENCY_CONVERTER_CLIENT = "currency_converter"
     PAYSTACK_PAYMENT_CLIENT = "paystack_payment_client"
 
 
@@ -603,6 +606,11 @@ class Services:
         if ClientType.PAYSTACK_PAYMENT_CLIENT in http_clients:
             cls.clients[ClientType.PAYSTACK_PAYMENT_CLIENT.value] = PaystackPaymentClient()
 
+        if ClientType.CURRENCY_CONVERTER_CLIENT in http_clients:
+            cls.clients[ClientType.CURRENCY_CONVERTER_CLIENT.value] = CurrencyConverter.configure(
+                fiat_api_key=os.getenv("EXCHANGE_RATE_API_KEY")
+            )
+
         if kafka_topics:
             consumer = cls.clients["kafka"].create_consumer(
                 group_id=group_id, topics=kafka_topics, message_handler=message_handler
@@ -997,7 +1005,7 @@ class EndpointBuilder:
     def __call__(self, *args) -> "EndpointBuilder":
         """Handle path arguments like .address('...')"""
         new_path = f"{self.path}/{'/'.join(str(arg) for arg in args)}"
-        return EndpointBuilder(self.client, new_path.lstrip('/'))
+        return EndpointBuilder(self.client, new_path.lstrip("/"))
 
     def call(self, **params) -> Any:
         """Execute the request"""
@@ -1079,3 +1087,111 @@ class BTCClient:
 
 
 class EthereumClient: ...
+
+
+class CurrencyConverter:
+    _fiat_api_key = None
+    _fiat_base_url = "https://v6.exchangerate-api.com/v6"
+    _crypto_base_url = "https://api.coingecko.com/api/v3"
+    _crypto_id_map = {
+        "BTC": "bitcoin",
+        "ETH": "ethereum",
+        "USDT": "tether",
+        "USDC": "usd-coin",
+        "ChatsUSDC": "usd-coin",
+    }
+
+    @classmethod
+    def configure(cls, *, fiat_api_key=None, fiat_base_url=None, crypto_base_url=None, crypto_id_map=None):
+        if fiat_api_key:
+            cls._fiat_api_key = fiat_api_key
+        if fiat_base_url:
+            cls._fiat_base_url = fiat_base_url
+        if crypto_base_url:
+            cls._crypto_base_url = crypto_base_url
+        if crypto_id_map:
+            cls._crypto_id_map.update(crypto_id_map)
+
+    @classmethod
+    async def get_rate(cls, base_currency, target_currency):
+        if base_currency == target_currency:
+            return Decimal("1.0")
+
+        cache_key = f"rate_{base_currency}_{target_currency}"
+        cached = cache.get(cache_key)
+        if cached:
+            return Decimal(cached)
+
+        rate = (
+            await cls._fetch_fiat_rate(base_currency, target_currency)
+            if base_currency not in cls._crypto_id_map
+            else await cls._fetch_crypto_rate(base_currency, target_currency)
+        )
+
+        if rate:
+            cache.set(cache_key, str(rate), 300)
+        return rate
+
+    @classmethod
+    async def get_historical_rate(cls, base_currency, target_currency, date):
+        if base_currency == target_currency:
+            return Decimal("1.0")
+
+        cache_key = f"hist_{base_currency}_{target_currency}_{date.isoformat()}"
+        cached = cache.get(cache_key)
+        if cached:
+            return Decimal(cached)
+
+        rate = (
+            await cls._fetch_fiat_historical(base_currency, target_currency, date)
+            if base_currency not in cls._crypto_id_map
+            else await cls._fetch_crypto_historical(base_currency, target_currency, date)
+        )
+
+        if rate:
+            cache.set(cache_key, str(rate), 86400)
+        return rate
+
+    @classmethod
+    async def _fetch_fiat_rate(cls, base, target):
+        if not cls._fiat_api_key:
+            return None
+
+        url = f"{cls._fiat_base_url}/{cls._fiat_api_key}/latest/{base}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                data = await resp.json()
+                return Decimal(str(data["conversion_rates"][target])) if data.get("result") == "success" else None
+
+    @classmethod
+    async def _fetch_crypto_rate(cls, base, target):
+        coin_id = cls._crypto_id_map.get(base)
+        if not coin_id:
+            return None
+
+        url = f"{cls._crypto_base_url}/simple/price?ids={coin_id}&vs_currencies={target.lower()}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                data = await resp.json()
+                return Decimal(str(data[coin_id][target.lower()])) if data.get(coin_id) else None
+
+    @classmethod
+    async def _fetch_fiat_historical(cls, base, target, date):
+        url = f"{cls._fiat_base_url}/{cls._fiat_api_key}/history/{base}/{date:%Y/%m/%d}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                data = await resp.json()
+                return Decimal(str(data["conversion_rates"][target])) if data.get("result") == "success" else None
+
+    @classmethod
+    async def _fetch_crypto_historical(cls, base, target, date):
+        coin_id = cls._crypto_id_map.get(base)
+        if not coin_id:
+            return None
+
+        url = f"{cls._crypto_base_url}/coins/{coin_id}/history?date={date:%d-%m-%Y}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                data = await resp.json()
+                price = data.get("market_data", {}).get("current_price", {}).get(target.lower())
+                return Decimal(str(price)) if price else None
