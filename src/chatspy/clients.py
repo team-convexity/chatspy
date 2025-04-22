@@ -29,7 +29,7 @@ from django.core.serializers import serialize
 from redis.cluster import RedisCluster, ClusterNode
 from kafka import KafkaProducer, KafkaConsumer, errors as KafkaErrors
 
-from .utils import Logger
+from .utils import Logger, is_production
 from .services import Service
 from .schemas import IdentityVerificationSchema
 
@@ -1092,106 +1092,96 @@ class EthereumClient: ...
 class CurrencyConverter:
     _fiat_api_key = None
     _fiat_base_url = "https://v6.exchangerate-api.com/v6"
-    _crypto_base_url = "https://api.coingecko.com/api/v3"
+    _crypto_apis = ["https://api.coinlore.net/api", "https://api.coincap.io/v2"]
     _crypto_id_map = {
-        "BTC": "bitcoin",
-        "ETH": "ethereum",
-        "USDT": "tether",
-        "USDC": "usd-coin",
-        "ChatsUSDC": "usd-coin",
+        "BTC": {"coinlore": "90", "coincap": "bitcoin"},
+        "ETH": {"coinlore": "80", "coincap": "ethereum"},
+        "USDT": {"coinlore": "518", "coincap": "tether"},
+        "USDC": {"coinlore": "33285", "coincap": "usd-coin"},
+        "ChatsUSDC": {"coinlore": "33285", "coincap": "usd-coin"},
     }
+    _timeout = 5
 
     @classmethod
-    def configure(cls, *, fiat_api_key=None, fiat_base_url=None, crypto_base_url=None, crypto_id_map=None):
-        if fiat_api_key:
+    def configure(cls, *, fiat_api_key=None, fiat_base_url=None, crypto_apis=None, crypto_id_map=None, timeout=None):
+        if fiat_api_key is not None:
             cls._fiat_api_key = fiat_api_key
-        if fiat_base_url:
+        if fiat_base_url is not None:
             cls._fiat_base_url = fiat_base_url
-        if crypto_base_url:
-            cls._crypto_base_url = crypto_base_url
-        if crypto_id_map:
+        if crypto_apis is not None:
+            cls._crypto_apis = crypto_apis
+        if crypto_id_map is not None:
             cls._crypto_id_map.update(crypto_id_map)
+        if timeout is not None:
+            cls._timeout = timeout
+        return cls
 
     @classmethod
-    async def get_rate(cls, base_currency, target_currency):
+    def get_rate(cls, base_currency: str, target_currency: str, date: datetime = None) -> Decimal | None:
         if base_currency == target_currency:
             return Decimal("1.0")
 
-        cache_key = f"rate_{base_currency}_{target_currency}"
-        cached = cache.get(cache_key)
-        if cached:
+        cache_key = f"rate_{base_currency}_{target_currency}_{date.date() if date else 'current'}"
+        if cached := cache.get(cache_key):
             return Decimal(cached)
 
-        rate = (
-            await cls._fetch_fiat_rate(base_currency, target_currency)
-            if base_currency not in cls._crypto_id_map
-            else await cls._fetch_crypto_rate(base_currency, target_currency)
-        )
-
-        if rate:
-            cache.set(cache_key, str(rate), 300)
-        return rate
-
-    @classmethod
-    async def get_historical_rate(cls, base_currency, target_currency, date):
-        if base_currency == target_currency:
-            return Decimal("1.0")
-
-        cache_key = f"hist_{base_currency}_{target_currency}_{date.isoformat()}"
-        cached = cache.get(cache_key)
-        if cached:
-            return Decimal(cached)
-
-        rate = (
-            await cls._fetch_fiat_historical(base_currency, target_currency, date)
-            if base_currency not in cls._crypto_id_map
-            else await cls._fetch_crypto_historical(base_currency, target_currency, date)
-        )
-
+        rate = cls._fetch_rate(base_currency, target_currency)
         if rate:
             cache.set(cache_key, str(rate), 86400)
         return rate
 
     @classmethod
-    async def _fetch_fiat_rate(cls, base, target):
+    def _fetch_rate(cls, base: str, target: str) -> Decimal | None:
+        if base in cls._crypto_id_map:
+            usd_rate = cls._fetch_crypto_rate(base)
+            if not usd_rate:
+                return None
+            return usd_rate * cls._fetch_fiat_rate("USD", target)
+        return cls._fetch_fiat_rate(base, target)
+
+    @classmethod
+    def _fetch_crypto_rate(cls, base: str) -> Decimal | None:
+        for api_url in cls._crypto_apis:
+            try:
+                if "coinlore" in api_url:
+                    rate = cls._fetch_coinlore_rate(base)
+                elif "coincap" in api_url:
+                    rate = cls._fetch_coincap_rate(base)
+
+                if rate:
+                    return rate
+            except Exception as e:
+                logger.warning(f"Crypto API failed: {str(e)}")
+        return None
+
+    @classmethod
+    def _fetch_coinlore_rate(cls, base: str) -> Decimal | None:
+        coin_id = cls._crypto_id_map.get(base, {}).get("coinlore")
+        if not coin_id:
+            return None
+
+        response = requests.get(f"{cls._crypto_apis[0]}/ticker/?id={coin_id}", timeout=cls._timeout)
+        response.raise_for_status()
+        data = response.json()
+        return Decimal(data[0]["price_usd"]) if data else None
+
+    @classmethod
+    def _fetch_coincap_rate(cls, base: str) -> Decimal | None:
+        coin_id = cls._crypto_id_map.get(base, {}).get("coincap")
+        if not coin_id:
+            return None
+
+        response = requests.get(f"{cls._crypto_apis[1]}/assets/{coin_id}", timeout=cls._timeout)
+        response.raise_for_status()
+        data = response.json()
+        return Decimal(data["data"]["priceUsd"]) if data.get("data") else None
+
+    @classmethod
+    def _fetch_fiat_rate(cls, base: str, target: str) -> Decimal | None:
         if not cls._fiat_api_key:
             return None
 
-        url = f"{cls._fiat_base_url}/{cls._fiat_api_key}/latest/{base}"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                data = await resp.json()
-                return Decimal(str(data["conversion_rates"][target])) if data.get("result") == "success" else None
-
-    @classmethod
-    async def _fetch_crypto_rate(cls, base, target):
-        coin_id = cls._crypto_id_map.get(base)
-        if not coin_id:
-            return None
-
-        url = f"{cls._crypto_base_url}/simple/price?ids={coin_id}&vs_currencies={target.lower()}"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                data = await resp.json()
-                return Decimal(str(data[coin_id][target.lower()])) if data.get(coin_id) else None
-
-    @classmethod
-    async def _fetch_fiat_historical(cls, base, target, date):
-        url = f"{cls._fiat_base_url}/{cls._fiat_api_key}/history/{base}/{date:%Y/%m/%d}"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                data = await resp.json()
-                return Decimal(str(data["conversion_rates"][target])) if data.get("result") == "success" else None
-
-    @classmethod
-    async def _fetch_crypto_historical(cls, base, target, date):
-        coin_id = cls._crypto_id_map.get(base)
-        if not coin_id:
-            return None
-
-        url = f"{cls._crypto_base_url}/coins/{coin_id}/history?date={date:%d-%m-%Y}"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                data = await resp.json()
-                price = data.get("market_data", {}).get("current_price", {}).get(target.lower())
-                return Decimal(str(price)) if price else None
+        response = requests.get(f"{cls._fiat_base_url}/{cls._fiat_api_key}/latest/{base}", timeout=cls._timeout)
+        response.raise_for_status()
+        data = response.json()
+        return Decimal(str(data["conversion_rates"][target])) if data.get("result") == "success" else None
