@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import asyncio
 import secrets
@@ -186,7 +187,7 @@ class Asset(Enum):
                 logger.warning(f"Unkwown chain: {chain}")
 
     @staticmethod
-    def send_usdc(chain: Chain, source_address: str, destination_address: str, amount: str, source_secret: str):
+    def transfer_funds(chain: Chain, source_address: str, destination_address: str, amount: str, source_secret: str):
         match chain:
             case Chain.STELLAR:
                 BASE_FEE = 100  # base fee, in stroops
@@ -277,6 +278,25 @@ class Asset(Enum):
             case _:
                 logger.warning(f"Unknown chain: {chain}")
                 return None
+
+    @staticmethod
+    def is_valid_address(chain: Chain, address: str) -> bool:
+        address = address.strip()
+        match chain:
+            case Chain.BITCOIN:
+                pattern = r"^(bc1|[13]|[mn2]|tb1)[a-zA-HJ-NP-Z0-9]{25,90}$"
+                return re.match(pattern, address) is not None
+
+            case Chain.ETHEREUM:
+                pattern = r"^0x[a-fA-F0-9]{40}$"
+                return re.match(pattern, address) is not None
+
+            case Chain.STELLAR:
+                pattern = r"^G[A-Z0-9]{55}$"
+                return re.match(pattern, address) is not None
+
+            case _:
+                return False
 
 
 class Contract:
@@ -846,18 +866,6 @@ class StellarProjectContract(Contract):
         ]
         return self._invoke("redeem_item_claims", args, vendor)
 
-    def redeem_cash_claims(
-        self, vendor: StellarKeypair, project_id: Optional[str], currency: str, amount: int
-    ) -> Dict[str, Any]:
-        """Redeem vendor cash claims"""
-        args = [
-            Address(vendor.public_key).to_scval(),
-            scval.from_string(project_id) if project_id else scval.from_void(),
-            scval.from_string(currency),
-            scval.from_u64(amount),
-        ]
-        return self._invoke("redeem_cash_claims", args, vendor)
-
     def get_cash_allowance(self, project_id: str, allowee: str, currency: str) -> Allowance:
         """Retrieve cash allowance details"""
         key = xdr.LedgerKey.contract_data(
@@ -913,6 +921,25 @@ class StellarProjectContract(Contract):
                 scval.to_string(currency),
                 scval.to_uint64(int(amount * (10**7))),
                 scval.to_address(vendor) if vendor else scval.to_void(),
+            ],
+            caller_keypair,
+        )
+
+    def redeem_cash_claims(
+        self, vendor_secret: StellarKeypair, project_id: str, currency: str, amount: int
+    ) -> Dict[str, Any]:
+        """
+        Claim cash allowance by beneficiaries
+        """
+
+        caller_keypair = StellarKeypair.from_secret(vendor_secret)
+        return self._invoke(
+            "redeem_cash_claims",
+            [
+                scval.to_address(caller_keypair.public_key),
+                scval.to_string(project_id),
+                scval.to_string(currency),
+                scval.to_uint64(int(amount * (10**7))),
             ],
             caller_keypair,
         )
