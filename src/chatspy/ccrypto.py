@@ -12,8 +12,8 @@ from eth_keys import keys
 from eth_account import Account
 from eth_utils import decode_hex
 from botocore.exceptions import ClientError
-from stellar_sdk.exceptions import NotFoundError
 from bitcoin import random_key, privtopub, pubtoaddr, encode_pubkey
+from stellar_sdk.exceptions import NotFoundError, AccountNotFoundException
 from stellar_sdk import (
     xdr,
     scval,
@@ -613,60 +613,93 @@ class StellarProjectContract(Contract):
 
     def _invoke(self, fn_name: str, args: list[xdr.SCVal], signer: StellarKeypair):
         """Generic function invoker"""
+        MAX_RETRIES = 1
+        retry_count = 0
         context = None
-        try:
-            contract_owner_seed = os.getenv("STELLAR_CONTRACT_OWNER_SEED_PHRASE")
-            if not contract_owner_seed:
-                raise ValueError("stellar_contract_owner_seed_phrase not set")
 
-            decrypted_seed = Contract.decrypt_key(contract_owner_seed)
-            sponsor = StellarKeypair.from_mnemonic_phrase(decrypted_seed)
-            signer_account = self.server.load_account(signer.public_key)
+        while retry_count <= MAX_RETRIES:
+            try:
+                contract_owner_seed = os.getenv("STELLAR_CONTRACT_OWNER_SEED_PHRASE")
+                if not contract_owner_seed:
+                    raise ValueError("stellar_contract_owner_seed_phrase not set")
 
-            inner_tx = (
-                TransactionBuilder(
-                    base_fee=100 * 2,
-                    source_account=signer_account,
+                decrypted_seed = Contract.decrypt_key(contract_owner_seed)
+                sponsor = StellarKeypair.from_mnemonic_phrase(decrypted_seed)
+                signer_account = self.server.load_account(signer.public_key)
+
+                inner_tx = (
+                    TransactionBuilder(
+                        base_fee=100 * 2,
+                        source_account=signer_account,
+                        network_passphrase=self.network_passphrase,
+                    )
+                    .set_timeout(18000)  # 5h
+                    .append_invoke_contract_function_op(
+                        parameters=args,
+                        function_name=fn_name,
+                        source=signer.public_key,
+                        contract_id=self.contract_id,
+                    )
+                    .build()
+                )
+
+                sim_resp = self.server.simulate_transaction(inner_tx)
+                context = ContractErrorContext(
+                    function=fn_name, args=args, raw_error=sim_resp.error, simulation_result=sim_resp.results
+                )
+
+                if sim_resp.error:
+                    self._handle_error(context)
+
+                prepared_tx = self.server.prepare_transaction(inner_tx, sim_resp)
+                prepared_tx.sign(signer)
+
+                # sponsor
+                fee_bump_tx = TransactionBuilder.build_fee_bump_transaction(
+                    fee_source=sponsor.public_key,
+                    inner_transaction_envelope=prepared_tx,
                     network_passphrase=self.network_passphrase,
+                    base_fee=sim_resp.min_resource_fee + 10_000,
                 )
-                .set_timeout(18000)  # 5h
-                .append_invoke_contract_function_op(
-                    parameters=args,
-                    function_name=fn_name,
-                    source=signer.public_key,
-                    contract_id=self.contract_id,
-                )
-                .build()
-            )
+                fee_bump_tx.sign(sponsor)
 
-            sim_resp = self.server.simulate_transaction(inner_tx)
-            context = ContractErrorContext(
-                function=fn_name, args=args, raw_error=sim_resp.error, simulation_result=sim_resp.results
-            )
+                # send
+                resp = self.server.send_transaction(fee_bump_tx)
+                return self._parse_response(resp)
 
-            if sim_resp.error:
+            except AccountNotFoundException as e:
+                if retry_count >= MAX_RETRIES:
+                    raise AccountNotFoundException(
+                        f"{signer.public_key} - Failed to auto activate wallet - retries failed"
+                    )
+
+                logger.w(message="AccountNotFoundException: Account not found error occurred", description=str(e))
+                logger.i(message=f"Activating account: {signer.public_key}")
+
+                response: dict[str, Any] | None = tasks.activate_wallet(account_private=signer.secret)
+
+                if not response:
+                    raise AccountNotFoundException(f"{signer.public_key} - Failed to auto activate wallet")
+
+                hash = response.get("hash", None)
+                if not hash:
+                    raise AccountNotFoundException(f"{signer.public_key} - Failed to auto activate wallet - {response}")
+
+                success: bool | None = Asset.wait_for_transaction_confirmation(chain=Chain.STELLAR, hash=hash)
+
+                if not success:
+                    raise AccountNotFoundException(
+                        f"{signer.public_key} - Failed to auto activate wallet - {response} - L3"
+                    )
+
+                retry_count += 1
+                continue
+
+            except Exception as e:
+                if not context:
+                    context = ContractErrorContext(function=fn_name, args=args, raw_error=str(e))
+
                 self._handle_error(context)
-
-            prepared_tx = self.server.prepare_transaction(inner_tx, sim_resp)
-            prepared_tx.sign(signer)
-
-            # sponsor
-            fee_bump_tx = TransactionBuilder.build_fee_bump_transaction(
-                fee_source=sponsor.public_key,
-                inner_transaction_envelope=prepared_tx,
-                network_passphrase=self.network_passphrase,
-                base_fee=sim_resp.min_resource_fee + 10_000,
-            )
-            fee_bump_tx.sign(sponsor)
-
-            # send
-            resp = self.server.send_transaction(fee_bump_tx)
-            return self._parse_response(resp)
-
-        except Exception as e:
-            if not context:
-                context = ContractErrorContext(function=fn_name, args=args, raw_error=str(e))
-            self._handle_error(context)
 
     async def _query(
         self,

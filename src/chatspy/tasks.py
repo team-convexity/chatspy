@@ -17,7 +17,7 @@ def cactivate_wallet(account_private: str):
 
 
 def activate_wallet(account_private: str):
-    _activate_wallet(account_private)
+    return _activate_wallet(account_private)
 
 
 def _activate_wallet(account_private: str):
@@ -63,13 +63,14 @@ def _activate_wallet(account_private: str):
 
             # sponsor the usdc trustline
             faucet = StellarFaucet()
-            faucet.create_trustline(
+            response = faucet.create_trustline(
                 account_keypair,
                 asset_code="USDC",
                 asset_issuer=STELLAR_USDC_ACCOUNT_ID,
                 sponsor_keypair=contract_owner_keypair,
             )
             logger.info(f"sponsored usdc trustline for {account_keypair.public_key}")
+            return response
 
         else:
             transaction = (
@@ -97,13 +98,14 @@ def _activate_wallet(account_private: str):
             logger.info(f"sponsored ChatsUSDC trustline for {account_keypair.public_key}")
 
             # send test asset
-            faucet.send_chats_usdc(
+            response = faucet.send_chats_usdc(
                 recipient_public=account_keypair.public_key,
                 recipient_secret=account_keypair.secret,
                 amount=1,
                 has_trustline=True,
             )
             logger.info(f"sent 1 ChatsUSDC to {account_keypair.public_key}")
+            return response
 
     except NotFoundError as e:
         logger.error(f"account not found: {e}")
