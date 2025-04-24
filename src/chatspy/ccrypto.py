@@ -685,7 +685,7 @@ class StellarProjectContract(Contract):
                 if not hash:
                     raise AccountNotFoundException(f"{signer.public_key} - Failed to auto activate wallet - {response}")
 
-                success: bool | None = Asset.wait_for_transaction_confirmation(chain=Chain.STELLAR, hash=hash)
+                success: bool | None = Asset.wait_for_transaction_confirmation(chain=Chain.STELLAR, tx_hash=hash)
 
                 if not success:
                     raise AccountNotFoundException(
