@@ -298,6 +298,45 @@ class Asset(Enum):
             case _:
                 return False
 
+    @staticmethod
+    def stellar_is_active(address: str) -> bool:
+        try:
+            StellarKeypair.from_public_key(address)
+        except ValueError:
+            return False
+
+        server = get_server()
+
+        try:
+            server.accounts().account_id(address).call()
+            return True
+        except NotFoundError:
+            return False
+
+    @staticmethod
+    def stellar_has_trustline(address: str, asset: "Asset") -> bool:
+        if asset == Asset.USDC:
+            issuer = STELLAR_USDC_ACCOUNT_ID
+
+        elif asset == Asset.ChatsUSDC:
+            issuer = TEST_STELLAR_USDC_ACCOUNT_ID
+
+        else:
+            return False
+
+        server = get_server()
+        try:
+            account = server.accounts().account_id(address).call()
+            for balance in account["balances"]:
+                code = balance.get("asset_code", "")
+                if code == asset.name and balance["asset_issuer"] == issuer:
+                    return True
+
+            return False
+
+        except NotFoundError:
+            return False
+
 
 class Contract:
     """
