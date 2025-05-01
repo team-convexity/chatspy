@@ -89,7 +89,7 @@ class SorobanErrorHandler(ErrorHandler):
     def _try_handle(self, context: ContractErrorContext) -> Optional[ContractError]:
         if not context.raw_error:
             return None
-        
+
         match = self.ERROR_REGEX.search(context.raw_error)
         if not match:
             return None
@@ -221,3 +221,10 @@ class ExpiredAllowanceError(ContractError):
 
     def __init__(self, message: str = "Allowance has expired", context: Optional[ContractErrorContext] = None):
         super().__init__(message, 1006, context)
+
+
+class PaymentError(Exception):
+    def __init__(self, message: str, client: str, original_exception: Optional[Exception] = None):
+        super().__init__(f"[{client}] {message}")
+        self.client = client
+        self.original_exception = original_exception

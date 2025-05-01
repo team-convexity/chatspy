@@ -1,10 +1,11 @@
 import re
 import os
 import sys
+import time
+import uuid
 import json
 import hmac
 import codecs
-import aiohttp
 import logging
 import hashlib
 import tempfile
@@ -31,6 +32,7 @@ from kafka import KafkaProducer, KafkaConsumer, errors as KafkaErrors
 
 from .utils import Logger, is_production
 from .services import Service
+from .exceptions import PaymentError
 from .schemas import IdentityVerificationSchema
 
 logger = Logger.get_logger()
@@ -789,12 +791,10 @@ class PaymentClient:
 
 
 class PaystackPaymentClient(PaymentClient):
-    SUCCESS_STATUS = "success"
-
     def __init__(self, **kwargs):
         self.secret_key = os.getenv("PAYSTACK_SECRET_KEY")
         self.client = requests.Session()
-        self.client.headers["Authorization"] = f"Bearer {self.secret_key}"
+        self.client.headers.update({"Content-Type": "application/json", "Authorization": f"Bearer {self.secret_key}"})
 
     def initialize(self, data: Dict[str, Any]) -> requests.Response:
         try:
@@ -804,7 +804,7 @@ class PaystackPaymentClient(PaymentClient):
             return res
         except requests.exceptions.RequestException as e:
             logger.error(f"Error initializing transaction: {e}")
-            raise
+            raise PaymentError(str(e), "paystack", e)
 
     def verify_transaction(self, reference: str) -> Dict[str, Any]:
         try:
@@ -814,17 +814,28 @@ class PaystackPaymentClient(PaymentClient):
             return res.json()
         except requests.exceptions.RequestException as e:
             logger.error(f"Error verifying transaction: {e}")
-            raise
+            raise PaymentError(str(e), "paystack", e)
 
-    def transfer(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def transfer(
+        self, amount: int, recipient_code: str, reason: str, currency: str = "NGN", account_reference: str = ""
+    ) -> Dict[str, Any]:
         try:
-            res = self.client.post("https://api.paystack.co/transfer", json=data)
+            payload = {
+                "amount": amount,
+                "reason": reason,
+                "source": "balance",
+                "currency": currency,
+                "reference": uuid.uuid4(),
+                "recipient": recipient_code,
+                "account_reference": account_reference,
+            }
+            res = self.client.post("https://api.paystack.co/transfer", json=payload)
             res.raise_for_status()
             logger.info(f"Transfer initiated: {res.json()}")
             return res.json()
         except requests.exceptions.RequestException as e:
             logger.error(f"Error initiating transfer: {e}")
-            raise
+            raise PaymentError(str(e), "paystack", e)
 
     def get_banks(self, currency: str = "NGN") -> requests.Response:
         try:
@@ -834,7 +845,7 @@ class PaystackPaymentClient(PaymentClient):
             return res
         except requests.exceptions.RequestException as e:
             logger.error(f"Error retrieving banks: {e}")
-            raise
+            raise PaymentError(str(e), "paystack", e)
 
     def resolve_account(self, acc_number: str, bank_code: str) -> Dict[str, Any]:
         try:
@@ -846,11 +857,56 @@ class PaystackPaymentClient(PaymentClient):
             return res.json()
         except requests.exceptions.RequestException as e:
             logger.error(f"Error resolving account: {e}")
-            raise
+            raise PaymentError(str(e), "paystack", e)
 
     @staticmethod
     def calculate_hmac(data: bytes, secret: str) -> str:
         return hmac.new(secret.encode("utf-8"), data, digestmod=hashlib.sha512).hexdigest()
+
+    def create_transfer_recipient(
+        self, bank_code: str, account_name: str, account_number: str, currency: str = "NGN"
+    ) -> Dict[str, Any]:
+        try:
+            payload = {
+                "type": "nuban",
+                "name": account_name,
+                "account_number": account_number,
+                "bank_code": bank_code,
+                "currency": currency,
+            }
+            res = self.client.post("https://api.paystack.co/transferrecipient", json=payload)
+            res.raise_for_status()
+            return res.json()["data"]
+        except requests.exceptions.RequestException as e:
+            raise PaymentError(str(e), "paystack", e)
+
+    def finalize_transfer(self, transfer_code: str, otp: str) -> Dict[str, Any]:
+        try:
+            res = self.client.post(
+                "https://api.paystack.co/transfer/finalize_transfer", json={"transfer_code": transfer_code, "otp": otp}
+            )
+            res.raise_for_status()
+            return res.json()["data"]
+        except requests.exceptions.RequestException as e:
+            raise PaymentError(str(e), "paystack", e)
+
+    def check_transfer_status(self, reference: str, max_retries: int = 5, retry_delay: int = 3) -> Dict[str, Any]:
+        for attempt in range(max_retries):
+            try:
+                res = self.client.get(f"https://api.paystack.co/transfer/{reference}")
+                res.raise_for_status()
+                data = res.json()["data"]
+
+                if data["status"].lower() == "success":
+                    return data
+                if data["status"].lower() in ["failed", "reversed"]:
+                    raise PaymentError(f"Transfer failed: {data['status']}", "paystack")
+
+                time.sleep(retry_delay)
+            except requests.exceptions.RequestException as e:
+                if attempt == max_retries - 1:
+                    raise PaymentError(str(e), "paystack", e)
+        raise PaymentError("Transfer status check timed out", "paystack")
 
 
 class SMSClient:
@@ -1127,7 +1183,7 @@ class CurrencyConverter:
 
         rate = cls._fetch_rate(base_currency, target_currency)
         if rate:
-            cache.set(cache_key, str(rate), 86400) # 24h
+            cache.set(cache_key, str(rate), 86400)  # 24h
         return rate
 
     @classmethod
