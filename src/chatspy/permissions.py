@@ -12,6 +12,22 @@ from chatspy.clients import RedisClient
 
 from .utils import verify_auth_token
 
+SystemRoleLiterals = Literal[
+    "ngo",
+    "vendor",
+    "beneficiary",
+    "adminindividual",
+    "donor_corporate",
+    "donor_individual",
+    "subadmin",
+    "poweruser",
+    "fieldagent",
+    "programlead",
+    "programcolead",
+    "financeofficer",
+    "m_and_e_officer",
+]
+
 
 class RoleValueMixin(str, Enum):
     """Mixin to add string behavior to Enum."""
@@ -161,7 +177,7 @@ class PermissionMapping:
             SystemRole.DONOR_INDIVIDUAL.value: cls.generate_permissions(
                 permission_types=[PermissionType.VIEW],
                 resources=[Resource.PROJECT, Resource.BENEFICIARY, Resource.ACCOUNT, Resource.VENDOR],
-            )
+            ),
         }
 
 
@@ -263,9 +279,9 @@ class Permissions(str, Enum):
         auth_org = user.auth_profile.get("organization")
         if not auth_org:
             return False
-        
+
         if isinstance(auth_org, list):
             return organization_id in [ChatsRecord.from_global_id(org_id)[1] for org_id in auth_org]
-        
+
         parsed_auth_org = ChatsRecord.from_global_id(auth_org)[1]
         return parsed_auth_org == organization_id
