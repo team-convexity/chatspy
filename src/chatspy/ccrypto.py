@@ -4,6 +4,7 @@ import time
 import asyncio
 import secrets
 from enum import Enum
+from decimal import Decimal
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, Tuple, Literal, NoReturn, overload
 
@@ -12,7 +13,6 @@ from eth_keys import keys
 from eth_account import Account
 from eth_utils import decode_hex
 from botocore.exceptions import ClientError
-from bitcoin import random_key, privtopub, pubtoaddr, encode_pubkey
 from stellar_sdk.exceptions import NotFoundError, AccountNotFoundException
 from stellar_sdk import (
     xdr,
@@ -27,6 +27,13 @@ from stellar_sdk import (
     Keypair as StellarKeypair,
 )
 from web3 import Web3
+from bitcoin import params
+from bitcoin.core import b2x, lx
+from bitcoin.core.key import CKey
+from bitcoin.wallet import CBitcoinSecret, P2PKHBitcoinAddress
+from bitcoin.core.script import CScript, SignatureHash, SIGHASH_ALL
+from bitcoin.core import CMutableTransaction, CMutableTxIn, CMutableTxOut
+
 
 from . import tasks
 from .exceptions import (
@@ -231,6 +238,84 @@ class Asset(Enum):
                 response = server.submit_transaction(transaction)
                 return response
 
+            case Chain.BITCOIN:
+                try:
+                    client = get_server("bitcoin")
+
+                    amount_sat = int(Decimal(amount) * 10**8)
+                    secret = CBitcoinSecret(source_secret)
+
+                    expected_address = str(P2PKHBitcoinAddress.from_pubkey(secret.pub))
+                    if expected_address != source_address:
+                        raise ValueError("Private key does not match source address")
+
+                    fee_rate = client.get_recommended_fee(target_blocks=3)
+                    if not is_production():
+                        fee_rate = min(fee_rate, 5)  # max 5 sat/vByte on testnet
+
+                    utxos = client.address(source_address).utxo().call()
+                    if not utxos:
+                        raise ValueError("No spendable UTXOs found")
+
+                    tx = CMutableTransaction()
+                    total_input = 0
+
+                    for utxo in utxos:
+                        tx.vin.append(CMutableTxIn(lx(utxo["txid"]), utxo["vout"]))
+                        total_input += utxo["value"]
+                        if total_input >= amount_sat:  # simple UTXO selection
+                            break
+
+                    estimated_size = 10 + (148 * len(tx.vin)) + (34 * 2)  # base + inputs + outputs
+                    estimated_fee = int(estimated_size * fee_rate)
+
+                    if total_input < amount_sat + estimated_fee:
+                        raise ValueError(
+                            f"Insufficient funds. Need {amount_sat + estimated_fee} satoshis, "
+                            f"have {total_input} satoshis available"
+                        )
+
+                    tx.vout.append(
+                        CMutableTxOut(amount_sat, P2PKHBitcoinAddress(destination_address).to_scriptPubKey())
+                    )
+
+                    change = total_input - amount_sat - estimated_fee
+                    if change > 0:
+                        tx.vout.append(CMutableTxOut(change, P2PKHBitcoinAddress(source_address).to_scriptPubKey()))
+
+                    # sign
+                    for i, utxo in enumerate(utxos[: len(tx.vin)]):
+                        tx.vin[i].scriptSig = CScript(
+                            [
+                                secret.sign(
+                                    SignatureHash(
+                                        P2PKHBitcoinAddress(source_address).to_scriptPubKey(), tx, i, SIGHASH_ALL
+                                    )
+                                )
+                                + bytes([SIGHASH_ALL]),
+                                secret.pub,
+                            ]
+                        )
+
+                    # serialize and broadcast
+                    raw_tx = bytes(tx).hex()
+                    txid = client.submit_transaction(raw_tx)
+
+                    return {
+                        "txid": txid,
+                        "fee_satoshis": estimated_fee,
+                        "size_bytes": len(raw_tx) // 2,
+                        "inputs": [{"txid": utxo["txid"], "vout": utxo["vout"]} for utxo in utxos[: len(tx.vin)]],
+                        "outputs": [
+                            {"address": destination_address, "value": amount_sat},
+                            *([{"address": source_address, "value": change}] if change > 0 else []),
+                        ],
+                    }
+
+                except Exception as e:
+                    logger.error(f"Bitcoin transfer failed: {str(e)}", exc_info=True)
+                    raise RuntimeError(f"Transaction failed: {str(e)}") from e
+
             case _:
                 logger.warning(f"[Submit Transaction]: Unhandled Chain: {chain}")
 
@@ -303,8 +388,12 @@ class Asset(Enum):
         address = address.strip()
         match chain:
             case Chain.BITCOIN:
-                pattern = r"^(bc1|[13]|[mn2]|tb1)[a-zA-HJ-NP-Z0-9]{25,90}$"
-                return re.match(pattern, address) is not None
+                network = params.BITCOIN_TESTNET if not is_production() else params.BITCOIN_MAINNET
+                try:
+                    P2PKHBitcoinAddress(address, network=network)
+                    return True
+                except Exception:
+                    return False
 
             case Chain.ETHEREUM:
                 pattern = r"^0x[a-fA-F0-9]{40}$"
@@ -428,12 +517,15 @@ class Contract:
 
         match chain:
             case Chain.BITCOIN:
-                private_key = random_key()
-                public_key = privtopub(private_key)
-                public_key_compressed = encode_pubkey(public_key, "hex_compressed")
-                address = pubtoaddr(
-                    public_key_compressed, magicbyte=0 if is_production() else 111
-                )  # 0=mainnet, 111=testnet
+                network = params.BITCOIN_MAINNET
+                if not is_production():
+                    network = params.BITCOIN_TESTNET
+
+                private_key_bytes = secrets.token_bytes(32)
+                key = CKey.from_secret_bytes(private_key_bytes)
+                wif_private_key = CBitcoinSecret.from_secret_bytes(private_key_bytes).to_wif(network.wif_prefix)
+                public_key_compressed = b2x(key.pub)
+                address = str(P2PKHBitcoinAddress.from_pubkey(key.pub, network))
                 wallets.append(
                     {
                         "address": address,
@@ -441,7 +533,7 @@ class Contract:
                         "asset": asset.symbol,
                         "display_name": asset.display_name,
                         "public_key": public_key_compressed,
-                        "private_key": Contract.encrypt_key(private_key),
+                        "private_key": Contract.encrypt_key(wif_private_key),
                     }
                 )
 
