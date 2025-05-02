@@ -387,7 +387,53 @@ class Asset(Enum):
                     return None
 
             case Chain.ETHEREUM:
-                ...
+                required_confirmations = 1
+                try:
+                    client = get_server("ethereum")
+                    start_time = time.time()
+                    while time.time() - start_time < timeout:
+                        try:
+                            receipt = client.web3.eth.get_transaction_receipt(tx_hash)
+
+                            if receipt is not None:
+                                # if successful
+                                if receipt.status == 0:
+                                    logger.w(f"ETH tx {tx_hash[:8]} failed (status=0)")
+                                    return False
+
+                                current_block = client.web3.eth.block_number
+                                confirmations = current_block - receipt.blockNumber
+
+                                if confirmations >= required_confirmations:
+                                    logger.i(f"ETH tx {tx_hash[:8]} confirmed with {confirmations} blocks")
+                                    return True
+                                else:
+                                    logger.d(
+                                        f"ETH tx {tx_hash[:8]} has {confirmations}/{required_confirmations} confirmations"
+                                    )
+
+                            # if dropped (not in mempool and no receipt)
+                            elif not client.web3.eth.get_transaction(tx_hash):
+                                logger.w(f"ETH tx {tx_hash[:8]} not found in mempool")
+                                return False
+
+                            time.sleep(poll_interval)
+                        except requests.exceptions.RequestException as e:
+                            logger.w(f"ETH tx {tx_hash[:8]} check failed (retrying): {str(e)}")
+                            time.sleep(poll_interval)
+                            continue
+
+                        except Exception as e:
+                            logger.e(f"ETH tx {tx_hash[:8]} monitoring error", exc_info=True, description=str(e))
+                            return None
+
+                    logger.w(f"ETH tx {tx_hash[:8]} monitoring timeout after {timeout} minutes")
+                    return None
+
+                except Exception as e:
+                    logger.e(f"ETH tx {tx_hash[:8]} monitoring failed", exc_info=True, description=str(e))
+                    return None
+
             case Chain.STELLAR:
                 try:
                     server = get_server()
