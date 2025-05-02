@@ -1,7 +1,12 @@
 import os
 import requests
-from .utils import logger
+from web3 import Web3
+from decimal import Decimal
+from eth_account import Account
+from web3.middleware import ExtraDataToPOAMiddleware as geth_poa_middleware
 from stellar_sdk import Server, Keypair, TransactionBuilder, Asset, Network
+
+from .utils import logger
 
 BASE_FEE = 100
 HORIZON_URL = "https://horizon-testnet.stellar.org"
@@ -52,6 +57,7 @@ class StellarFaucet:
         try:
             if not sponsor_keypair:
                 from .ccrypto import Contract
+
                 contract_owner_seed = os.getenv("STELLAR_CONTRACT_OWNER_SEED_PHRASE")
                 if not contract_owner_seed:
                     logger.error("stellar_contract_owner_seed_phrase is not set in the environment.")
@@ -75,7 +81,7 @@ class StellarFaucet:
                     network_passphrase=self.network_passphrase,
                     base_fee=BASE_FEE,
                 )
-                .set_timeout(18000) # 5h
+                .set_timeout(18000)  # 5h
                 .append_begin_sponsoring_future_reserves_op(sponsored_id=account_public)
                 .append_change_trust_op(
                     asset=asset,
@@ -100,12 +106,13 @@ class StellarFaucet:
     def end_sponsorship(self, account_keypair, sponsor_keypair=None):
         """
         end sponsorship for a specific account.
-        
+
         when a wallet, user, or ngo is deactivated/deleted, this removes their sponsorship
         """
         try:
             if not sponsor_keypair:
                 from .ccrypto import Contract
+
                 contract_owner_seed = os.getenv("STELLAR_CONTRACT_OWNER_SEED_PHRASE")
                 if not contract_owner_seed:
                     raise ValueError("stellar_contract_owner_seed_phrase is not set in the environment.")
@@ -125,7 +132,7 @@ class StellarFaucet:
                     network_passphrase=self.network_passphrase,
                     base_fee=BASE_FEE,
                 )
-                .set_timeout(18000) # 5h
+                .set_timeout(18000)  # 5h
                 .append_end_sponsoring_future_reserves_op(source=account_public)
                 .build()
             )
@@ -152,7 +159,7 @@ class StellarFaucet:
                 network_passphrase=self.network_passphrase,
                 base_fee=BASE_FEE,
             )
-            .set_timeout(18000) # 5h
+            .set_timeout(18000)  # 5h
             .append_payment_op(
                 destination=self.distributor_public,
                 asset=self.chats_usdc,
@@ -192,7 +199,7 @@ class StellarFaucet:
                 network_passphrase=self.network_passphrase,
                 base_fee=BASE_FEE,
             )
-            .set_timeout(18000) # 5h
+            .set_timeout(18000)  # 5h
             .append_payment_op(
                 destination=recipient_public,
                 asset=self.chats_usdc,
@@ -213,3 +220,157 @@ class StellarFaucet:
         self.create_trustline(self.distributor_keypair)
         self.issue_chats_usdc()
         logger.i("ChatsUSDC asset created and issued to distributor.")
+
+
+class USDTFaucet:
+    def __init__(self):
+        self.alchemy_key = os.getenv("ALCHEMY_API_KEY")
+        if not self.alchemy_key:
+            raise ValueError("ALCHEMY_API_KEY environment variable not set")
+
+        self.w3 = Web3(Web3.HTTPProvider(f"https://eth-sepolia.g.alchemy.com/v2/{self.alchemy_key}"))
+        self.w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+
+        self.deployer_key = os.getenv("USDT_DEPLOYER_KEY")
+        if not self.deployer_key:
+            raise ValueError("USDT_DEPLOYER_KEY environment variable not set")
+        self.deployer = Account.from_key(self.deployer_key)
+
+        self.usdt_contract_address = "0xEEAD57cD7D101FC7ae3635d467175B3f9De68312"
+        self.usdt_contract = self._load_usdt_contract()
+
+    def _load_usdt_contract(self):
+        usdt_abi = [
+            {
+                "anonymous": False,
+                "inputs": [
+                    {"indexed": True, "internalType": "address", "name": "owner", "type": "address"},
+                    {"indexed": True, "internalType": "address", "name": "spender", "type": "address"},
+                    {"indexed": False, "internalType": "uint256", "name": "value", "type": "uint256"},
+                ],
+                "name": "Approval",
+                "type": "event",
+            },
+            {
+                "anonymous": False,
+                "inputs": [
+                    {"indexed": True, "internalType": "address", "name": "from", "type": "address"},
+                    {"indexed": True, "internalType": "address", "name": "to", "type": "address"},
+                    {"indexed": False, "internalType": "uint256", "name": "value", "type": "uint256"},
+                ],
+                "name": "Transfer",
+                "type": "event",
+            },
+            {
+                "inputs": [
+                    {"internalType": "address", "name": "", "type": "address"},
+                    {"internalType": "address", "name": "", "type": "address"},
+                ],
+                "name": "allowance",
+                "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+                "stateMutability": "view",
+                "type": "function",
+            },
+            {
+                "inputs": [
+                    {"internalType": "address", "name": "spender", "type": "address"},
+                    {"internalType": "uint256", "name": "amount", "type": "uint256"},
+                ],
+                "name": "approve",
+                "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+                "stateMutability": "nonpayable",
+                "type": "function",
+            },
+            {
+                "inputs": [{"internalType": "address", "name": "", "type": "address"}],
+                "name": "balanceOf",
+                "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+                "stateMutability": "view",
+                "type": "function",
+            },
+            {
+                "inputs": [],
+                "name": "decimals",
+                "outputs": [{"internalType": "uint8", "name": "", "type": "uint8"}],
+                "stateMutability": "view",
+                "type": "function",
+            },
+            {
+                "inputs": [
+                    {"internalType": "address", "name": "to", "type": "address"},
+                    {"internalType": "uint256", "name": "amount", "type": "uint256"},
+                ],
+                "name": "mint",
+                "outputs": [],
+                "stateMutability": "nonpayable",
+                "type": "function",
+            },
+            {
+                "inputs": [],
+                "name": "name",
+                "outputs": [{"internalType": "string", "name": "", "type": "string"}],
+                "stateMutability": "view",
+                "type": "function",
+            },
+            {
+                "inputs": [],
+                "name": "symbol",
+                "outputs": [{"internalType": "string", "name": "", "type": "string"}],
+                "stateMutability": "view",
+                "type": "function",
+            },
+            {
+                "inputs": [],
+                "name": "totalSupply",
+                "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+                "stateMutability": "view",
+                "type": "function",
+            },
+            {
+                "inputs": [
+                    {"internalType": "address", "name": "to", "type": "address"},
+                    {"internalType": "uint256", "name": "amount", "type": "uint256"},
+                ],
+                "name": "transfer",
+                "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+                "stateMutability": "nonpayable",
+                "type": "function",
+            },
+            {
+                "inputs": [
+                    {"internalType": "address", "name": "from", "type": "address"},
+                    {"internalType": "address", "name": "to", "type": "address"},
+                    {"internalType": "uint256", "name": "amount", "type": "uint256"},
+                ],
+                "name": "transferFrom",
+                "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+                "stateMutability": "nonpayable",
+                "type": "function",
+            },
+        ]
+
+        return self.w3.eth.contract(address=self.usdt_contract_address, abi=usdt_abi)
+
+    def mint_usdt(self, recipient: str, amount: int = 1000) -> str:
+        """Mint test USDT to an address"""
+        tx = self.usdt_contract.functions.mint(
+            recipient,
+            int(Decimal(str(amount)) * 10**6),  # USDT 6 decimals
+        ).build_transaction(
+            {
+                "chainId": 11155111,
+                "gas": 200000,
+                "gasPrice": self.w3.eth.gas_price,
+                "nonce": self.w3.eth.get_transaction_count(self.deployer.address),
+            }
+        )
+
+        signed_tx = self.w3.eth.account.sign_transaction(tx, self.deployer_key)
+        tx_hash = self.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+        receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+        return receipt.transactionHash.hex()
+
+    def get_usdt_balance(self, address: str) -> Decimal:
+        """Check USDT balance for an address"""
+        balance = self.usdt_contract.functions.balanceOf(address).call()
+        return Decimal(balance) / Decimal(10**6)

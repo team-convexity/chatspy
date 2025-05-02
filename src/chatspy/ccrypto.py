@@ -26,6 +26,7 @@ from stellar_sdk import (
     Asset as StellarAsset,
     Keypair as StellarKeypair,
 )
+from web3 import Web3
 
 from . import tasks
 from .exceptions import (
@@ -38,11 +39,14 @@ from .exceptions import (
     SimulationErrorHandler,
 )
 from .services import Service
-from .clients import BTCClient, EthereumClient
+from .clients import BTCClient, EthereumClient, TokenInfo
 from .utils import logger, is_production
 
 STELLAR_USDC_ACCOUNT_ID = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"  # mainnet
 TEST_STELLAR_USDC_ACCOUNT_ID = "GBMAXTTNYNTJJCNUKZZBJLQD2ASIGZ3VBJT2HHX272LK7W4FPJCBEAYR"  # testnet.
+
+ETHEREUM_USDT_CONTRACT_ADDRESS = "0xdAC17F958D2ee523a2206206994597C13D831ec7"  # mainnet
+SEPOLIA_ETHEREUM_USDT_CONTRACT_ADDRESS = "0xEEAD57cD7D101FC7ae3635d467175B3f9De68312"  # testnet.
 
 
 @overload
@@ -62,7 +66,7 @@ def get_server(chain: Literal["ethereum"]) -> EthereumClient: ...
 
 
 def get_server(
-    chain: Literal["bitcoin", "ethereum", "stellar"] = "stellar",
+    chain: Optional[Literal["bitcoin", "ethereum", "stellar"]] = "stellar",
 ) -> Server | BTCClient | EthereumClient | None:
     if chain == "stellar":
         return Server("https://horizon-testnet.stellar.org" if not is_production() else "https://horizon.stellar.org")
@@ -72,6 +76,12 @@ def get_server(
             "https://blockstream.info/api/" if is_production() else "https://blockstream.info/testnet/api/"
         )
 
+    elif chain == "ethereum":
+        api_key = os.getenv("ALCHEMY_API_KEY")
+        base_url = "https://eth-mainnet.g.alchemy.com/v2" if is_production() else "https://eth-sepolia.g.alchemy.com/v2"
+        provider_url = f"{base_url}/{api_key}"
+        return EthereumClient(Web3(Web3.HTTPProvider(provider_url)))
+
     return Server("https://horizon-testnet.stellar.org" if not is_production() else "https://horizon.stellar.org")
 
 
@@ -80,6 +90,13 @@ def get_stellar_asset_account_id():
         return STELLAR_USDC_ACCOUNT_ID
 
     return TEST_STELLAR_USDC_ACCOUNT_ID
+
+
+def get_usdt_contract_address():
+    if is_production():
+        return ETHEREUM_USDT_CONTRACT_ADDRESS
+
+    return SEPOLIA_ETHEREUM_USDT_CONTRACT_ADDRESS
 
 
 def get_stellar_asset():
@@ -165,7 +182,7 @@ class Asset(Enum):
         return await asyncio.to_thread(lambda: server.operations().for_transaction(transaction_id).call())
 
     @staticmethod
-    def get_balance(address: str, chain: Chain):
+    def get_balance(address: str, chain: Chain, token: Optional[TokenInfo] = None):
         match chain:
             case Chain.BITCOIN:
                 client = get_server("bitcoin")
@@ -177,7 +194,9 @@ class Asset(Enum):
                     - balance_data["mempool_stats"]["spent_txo_sum"],
                 }
             case Chain.ETHEREUM:
-                ...
+                client = get_server(Chain.ETHEREUM.value)
+                balance = client.get_balance(address, token)
+                return {token.symbol if token else "ETH": balance}
 
             case Chain.STELLAR:
                 server = get_server()

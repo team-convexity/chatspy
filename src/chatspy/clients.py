@@ -30,10 +30,12 @@ from django.core.serializers import serialize
 from redis.cluster import RedisCluster, ClusterNode
 from kafka import KafkaProducer, KafkaConsumer, errors as KafkaErrors
 
-from .utils import Logger, is_production
+from web3 import Web3
 from .services import Service
 from .exceptions import PaymentError
+from .utils import Logger, is_production
 from .schemas import IdentityVerificationSchema
+from web3.types import TxParams, TxReceipt, HexStr
 
 logger = Logger.get_logger()
 
@@ -1148,7 +1150,45 @@ class BTCClient:
         return response.json()
 
 
-class EthereumClient: ...
+@dataclass(frozen=True)
+class TokenInfo:
+    symbol: str
+    contract_address: str
+    decimals: int = 6
+
+
+class EthereumClient:
+    def __init__(self, web3: Web3):
+        self.web3 = web3
+
+    def get_balance(self, address: str, token: Optional[TokenInfo] = None) -> Decimal:
+        if token is None:
+            balance = self.web3.eth.get_balance(address)
+            return Decimal(str(self.web3.from_wei(balance, "ether")))
+
+        contract = self.web3.eth.contract(
+            address=token.contract_address,
+            abi=[
+                {
+                    "inputs": [{"name": "_owner", "type": "address"}],
+                    "name": "balanceOf",
+                    "outputs": [{"name": "balance", "type": "uint256"}],
+                    "type": "function",
+                }
+            ],
+        )
+        balance = contract.functions.balanceOf(address).call()
+        return Decimal(balance) / (10**token.decimals)
+
+    def send_transaction(self, tx_params: TxParams, private_key: str) -> HexStr:
+        signed_tx = self.web3.eth.account.sign_transaction(tx_params, private_key)
+        return self.web3.eth.send_raw_transaction(signed_tx.raw_transaction)
+
+    def wait_for_transaction(self, tx_hash: HexStr, timeout: int = 120) -> TxReceipt:
+        return self.web3.eth.wait_for_transaction_receipt(tx_hash, timeout=timeout)
+
+    def get_transaction_history(self, address: str) -> list[Dict]:
+        return self.web3.eth.get_transactions_by_address(address)
 
 
 class CurrencyConverter:
