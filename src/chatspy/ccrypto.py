@@ -718,7 +718,7 @@ class Contract:
                         "asset": asset.symbol,
                         "public_key": address,
                         "display_name": asset.display_name,
-                        "private_key": Contract.encrypt_key(secret.to_wif()),
+                        "private_key": Contract.encrypt_key(str(secret)),
                     }
                 )
 
