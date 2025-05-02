@@ -241,7 +241,14 @@ class Asset(Enum):
                 logger.warning(f"Unkwown chain: {chain}")
 
     @staticmethod
-    def transfer_funds(chain: Chain, source_address: str, destination_address: str, amount: str, source_secret: str):
+    def transfer_funds(
+        chain: Chain,
+        source_address: str,
+        destination_address: str,
+        amount: str,
+        source_secret: str,
+        token: Optional[TokenInfo] = None,
+    ):
         match chain:
             case Chain.STELLAR:
                 BASE_FEE = 100  # base fee, in stroops
@@ -342,6 +349,80 @@ class Asset(Enum):
 
                 except Exception as e:
                     logger.error(f"Bitcoin transfer failed: {str(e)}", exc_info=True)
+                    raise RuntimeError(f"Transaction failed: {str(e)}") from e
+
+            case Chain.ETHEREUM:
+                try:
+                    client = get_server("ethereum")
+                    web3 = client.web3
+
+                    # validate pk
+                    account = web3.eth.account.from_key(source_secret)
+                    if account.address.lower() != source_address.lower():
+                        raise ValueError("Private key does not match source address")
+
+                    nonce = web3.eth.get_transaction_count(source_address, "pending")
+                    chain_id = web3.eth.chain_id
+                    gas_price = web3.eth.gas_price
+
+                    if token is None:
+                        # eth transfer
+                        value = web3.to_wei(Decimal(amount), "ether")
+                        gas_limit = 21000  # base
+
+                        tx_params = {
+                            "to": destination_address,
+                            "value": value,
+                            "gas": gas_limit,
+                            "gasPrice": gas_price,
+                            "nonce": nonce,
+                            "chainId": chain_id,
+                        }
+                    else:
+                        # erc20 transfer
+                        contract = web3.eth.contract(
+                            address=token.contract_address,
+                            abi=[
+                                {
+                                    "constant": False,
+                                    "inputs": [
+                                        {"name": "_to", "type": "address"},
+                                        {"name": "_value", "type": "uint256"},
+                                    ],
+                                    "name": "transfer",
+                                    "outputs": [{"name": "", "type": "bool"}],
+                                    "type": "function",
+                                }
+                            ],
+                        )
+                        amount_wei = int(Decimal(amount) * (10**token.decimals))
+
+                        # build transaction
+                        transfer_tx = contract.functions.transfer(destination_address, amount_wei)
+                        gas_limit = transfer_tx.estimate_gas({"from": source_address})
+
+                        tx_params = transfer_tx.build_transaction(
+                            {"gas": gas_limit, "gasPrice": gas_price, "nonce": nonce, "chainId": chain_id}
+                        )
+
+                    # sign and send
+                    signed_tx = web3.eth.account.sign_transaction(tx_params, source_secret)
+                    tx_hash = web3.eth.send_raw_transaction(signed_tx.rawTransaction)
+
+                    # get fee estimation
+                    fee_wei = tx_params["gas"] * tx_params["gasPrice"]
+
+                    return {
+                        "nonce": nonce,
+                        "fee_wei": fee_wei,
+                        "txid": tx_hash.hex(),
+                        "gas_limit": tx_params["gas"],
+                        "gas_price": tx_params["gasPrice"],
+                        "token": token.symbol if token else "ETH",
+                    }
+
+                except Exception as e:
+                    logger.e(message="Ethereum transfer failed", description=str(e))
                     raise RuntimeError(f"Transaction failed: {str(e)}") from e
 
             case _:
