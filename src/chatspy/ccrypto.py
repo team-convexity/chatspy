@@ -3,6 +3,7 @@ import re
 import time
 import asyncio
 import secrets
+import requests
 from enum import Enum
 from decimal import Decimal
 from dataclasses import dataclass
@@ -343,14 +344,48 @@ class Asset(Enum):
 
     @staticmethod
     def wait_for_transaction_confirmation(
-        chain: Chain, tx_hash: str, timeout: int = 6, poll_interval: int = 2
+        chain: Chain, tx_hash: str, timeout: int = 8, poll_interval: int = 2
     ) -> Optional[bool]:
         """
         Wait for transaction confirmation
         """
         match chain:
             case Chain.BITCOIN:
-                ...
+                try:
+                    client = get_server("bitcoin")
+                    start_time = time.time()
+                    while time.time() - start_time < timeout:
+                        try:
+                            tx_data = client.transactions(tx_hash).call()
+                            if "status" in tx_data and "confirmed" in tx_data["status"]:
+                                if tx_data["status"]["confirmed"]:
+                                    confirmations = tx_data.get("confirmations", 0)
+                                    logger.i(f"BTC tx {tx_hash[:8]} confirmed with {confirmations} confirmations")
+                                    return True
+
+                            # if transaction was dropped from mempool
+                            mempool = client.transactions().call(params={"txid": tx_hash})
+                            if not mempool:
+                                logger.w(f"BTC tx {tx_hash[:8]} not found in mempool or blocks")
+                                return False
+
+                            time.sleep(poll_interval)
+                        except requests.exceptions.RequestException as e:
+                            logger.w(f"BTC tx {tx_hash[:8]} check failed (retrying): {str(e)}")
+                            time.sleep(poll_interval)
+                            continue
+
+                        except Exception as e:
+                            logger.e(f"BTC tx {tx_hash[:8]} monitoring error", exc_info=True, description=str(e))
+                            return None
+
+                    logger.w(f"BTC tx {tx_hash[:8]} monitoring timeout after {timeout} minutes")
+                    return None
+
+                except Exception as e:
+                    logger.e(f"BTC tx {tx_hash[:8]} monitoring failed", exc_info=True, description=str(e))
+                    return None
+
             case Chain.ETHEREUM:
                 ...
             case Chain.STELLAR:
