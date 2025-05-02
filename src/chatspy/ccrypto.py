@@ -29,8 +29,8 @@ from stellar_sdk import (
 )
 from web3 import Web3
 from bitcoin import params
-from bitcoin.core import b2x, lx
-from bitcoin.core.key import CKey
+from bitcoin import SelectParams
+from bitcoin.core import x, b2x, lx
 from bitcoin.wallet import CBitcoinSecret, P2PKHBitcoinAddress
 from bitcoin.core.script import CScript, SignatureHash, SIGHASH_ALL
 from bitcoin.core import CMutableTransaction, CMutableTxIn, CMutableTxOut
@@ -706,23 +706,19 @@ class Contract:
 
         match chain:
             case Chain.BITCOIN:
-                network = params.BITCOIN_MAINNET
-                if not is_production():
-                    network = params.BITCOIN_TESTNET
-
+                SelectParams('mainnet' if is_production() else 'testnet')
                 private_key_bytes = secrets.token_bytes(32)
-                key = CKey.from_secret_bytes(private_key_bytes)
-                wif_private_key = CBitcoinSecret.from_secret_bytes(private_key_bytes).to_wif(network.wif_prefix)
-                public_key_compressed = b2x(key.pub)
-                address = str(P2PKHBitcoinAddress.from_pubkey(key.pub, network))
+                raw_private_key = b2x(private_key_bytes)
+                secret = CBitcoinSecret.from_secret_bytes(x(raw_private_key))
+                address = str(P2PKHBitcoinAddress.from_pubkey(secret.pub))
                 wallets.append(
                     {
                         "address": address,
                         "chain": chain.value,
                         "asset": asset.symbol,
+                        "public_key": address,
                         "display_name": asset.display_name,
-                        "public_key": public_key_compressed,
-                        "private_key": Contract.encrypt_key(wif_private_key),
+                        "private_key": Contract.encrypt_key(secret.to_wif()),
                     }
                 )
 
