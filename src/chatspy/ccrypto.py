@@ -174,7 +174,34 @@ class Asset(Enum):
                 ]
 
             case Chain.ETHEREUM:
-                return []
+                client = get_server("ethereum")
+                w3 = client.web3
+                txs = await asyncio.to_thread(lambda: w3.eth.get_transactions_by_address(address))
+
+                history = []
+                for tx in txs:
+                    receipt = await asyncio.to_thread(lambda: w3.eth.get_transaction_receipt(tx["hash"]))
+                    block = await asyncio.to_thread(lambda: w3.eth.get_block(tx["blockNumber"]))
+                    is_token_transfer = len(tx["input"]) > 10 and receipt and len(receipt["logs"]) > 0
+                    history.append(
+                        {
+                            "to": tx["to"],
+                            "from": tx["from"],
+                            "hash": tx["hash"].hex(),
+                            "value": str(tx["value"]),
+                            "gas_price": str(tx["gasPrice"]),
+                            "block_number": tx["blockNumber"],
+                            "is_token_transfer": is_token_transfer,
+                            "status": receipt["status"] if receipt else None,
+                            "timestamp": block["timestamp"] if block else None,
+                            "gas_used": receipt["gasUsed"] if receipt else None,
+                        }
+                    )
+
+                # sort by block number (descending)
+                history.sort(key=lambda x: x["block_number"] or 0, reverse=True)
+
+                return history
 
             case Chain.STELLAR:
                 server = get_server()
