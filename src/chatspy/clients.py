@@ -849,7 +849,6 @@ class PaystackPaymentClient(PaymentClient):
         try:
             res = self.client.get(f"https://api.paystack.co/bank?currency={currency}")
             res.raise_for_status()
-            logger.info(f"Banks retrieved: {res.json()}")
             return res
         except requests.exceptions.RequestException as e:
             logger.error(f"Error retrieving banks: {e}")
