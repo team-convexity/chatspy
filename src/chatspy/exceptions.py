@@ -129,7 +129,7 @@ class FallbackErrorHandler(ErrorHandler):
     """Handles all remaining errors"""
 
     def _try_handle(self, context: ContractErrorContext) -> ContractError:
-        return ContractError("Unhandled contract error", context)
+        return ContractError(f"Unhandled contract error: {context.as_dict()}", context)
 
 
 class ConfigurationError(Exception):
