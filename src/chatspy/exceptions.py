@@ -106,6 +106,10 @@ class SorobanErrorHandler(ErrorHandler):
             1004: (InvalidRoleError, "Invalid role specified"),
             1005: (ContractPausedError, "Contract operations paused"),
             1006: (ExpiredAllowanceError, "Allowance expired"),
+            1007: (StorageCorruption, "Storage Corruption"),
+            1008: (InvalidProjectId, "Invalid Project ID"),
+            1009: (RoleAlreadyExists, "Role Already Exists"),
+            1011: (ReentrancyDetected, "Reentrancy Detected"),
         }
 
         exc_type, message = mapping.get(code, (ContractError, "Unknown contract error"))
@@ -178,6 +182,10 @@ class ContractError(Exception):
             1004: 400,  # InvalidRole
             1005: 403,  # ContractPaused
             1006: 400,  # ExpiredAllowance
+            1007: 500,  # StorageCorruption
+            1008: 400,  # InvalidProjectId
+            1009: 400,  # RoleAlreadyExists
+            1011: 400,  # ReentrancyDetected
         }.get(code, 500)  # default to 500 if unknown code
 
 
@@ -221,6 +229,32 @@ class ExpiredAllowanceError(ContractError):
 
     def __init__(self, message: str = "Allowance has expired", context: Optional[ContractErrorContext] = None):
         super().__init__(message, 1006, context)
+
+
+class StorageCorruption(ContractError):
+    """Raised when there's a storage corruption"""
+
+    def __init__(self, message: str = "Corrupted storage", context: Optional[ContractErrorContext] = None):
+        super().__init__(message, 1007, context)
+
+
+class InvalidProjectId(ContractError):
+    """Raised when the project ID is not valid"""
+
+    def __init__(self, message: str = "Invalid Project ID", context: Optional[ContractErrorContext] = None):
+        super().__init__(message, 1008, context)
+
+
+class RoleAlreadyExists(ContractError):
+    """Raised when the role is already added"""
+
+    def __init__(self, message: str = "Role Already Exists", context: Optional[ContractErrorContext] = None):
+        super().__init__(message, 1009, context)
+
+
+class ReentrancyDetected(ContractError):
+    def __init__(self, message: str = "Reentrancy Detected", context: Optional[ContractErrorContext] = None):
+        super().__init__(message, 1011, context)
 
 
 class PaymentError(Exception):

@@ -706,7 +706,7 @@ class Contract:
 
         match chain:
             case Chain.BITCOIN:
-                SelectParams('mainnet' if is_production() else 'testnet')
+                SelectParams("mainnet" if is_production() else "testnet")
                 private_key_bytes = secrets.token_bytes(32)
                 raw_private_key = b2x(private_key_bytes)
                 secret = CBitcoinSecret.from_secret_bytes(x(raw_private_key))
