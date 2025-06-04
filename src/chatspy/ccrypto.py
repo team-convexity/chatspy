@@ -58,11 +58,11 @@ SEPOLIA_ETHEREUM_USDT_CONTRACT_ADDRESS = "0xEEAD57cD7D101FC7ae3635d467175B3f9De6
 
 
 @overload
-def get_server() -> Server: ...
+def get_server() -> Server | SorobanServer: ...
 
 
 @overload
-def get_server(chain: Literal["stellar"]) -> Server: ...
+def get_server(chain: Literal["stellar"]) -> Server | SorobanServer: ...
 
 
 @overload
@@ -77,8 +77,10 @@ def get_server(
     chain: Optional[Literal["bitcoin", "ethereum", "stellar"]] = "stellar",
 ) -> Server | BTCClient | EthereumClient | None:
     if chain == "stellar":
-        return Server(
-            "https://horizon-testnet.stellar.org" if not is_production() else "https://mainnet.sorobanrpc.com"
+        return (
+            SorobanServer(server_url="https://mainnet.sorobanrpc.com")
+            if is_production()
+            else Server(horizon_url="https://horizon-testnet.stellar.org")
         )
 
     elif chain == "bitcoin":
@@ -92,7 +94,11 @@ def get_server(
         provider_url = f"{base_url}/{api_key}"
         return EthereumClient(Web3(Web3.HTTPProvider(provider_url)))
 
-    return Server("https://horizon-testnet.stellar.org" if not is_production() else "https://mainnet.sorobanrpc.com")
+    return (
+        Server(horizon_url="https://horizon-testnet.stellar.org")
+        if not is_production()
+        else SorobanServer(server_url="https://mainnet.sorobanrpc.com")
+    )
 
 
 def get_stellar_asset_account_id():
@@ -907,10 +913,13 @@ class StellarProjectContract(Contract):
         rpc_url: Optional[str] = None,
     ):
         self.contract_id = contract_id
-        self.network_passphrase = network_passphrase
-        if is_production() and not all([network_passphrase, rpc_url]):
-            logger.error("RPC URL is required for production environment")
-            raise ValueError("RPC URL is required for production environment")
+        if is_production():
+            if not all([network_passphrase, rpc_url]):
+                logger.error("RPC URL is required for production environment")
+                raise ValueError("RPC URL is required for production environment")
+
+            self.rpc_url = rpc_url
+            self.network_passphrase = network_passphrase
 
         else:
             self.network_passphrase = Network.TESTNET_NETWORK_PASSPHRASE

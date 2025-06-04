@@ -1,6 +1,6 @@
 import os
 from stellar_sdk.exceptions import NotFoundError, BadResponseError
-from stellar_sdk import Server, Network, TransactionBuilder, Keypair
+from stellar_sdk import Server, SorobanServer, Network, TransactionBuilder, Keypair
 
 from .celery_config import app
 from .faucet import StellarFaucet
@@ -28,8 +28,10 @@ def _activate_wallet(account_private: str):
     try:
         # determine the network based on the environment
         network = Network.PUBLIC_NETWORK_PASSPHRASE if is_production() else Network.TESTNET_NETWORK_PASSPHRASE
-        server = Server(
-            horizon_url="https://horizon.stellar.org" if is_production() else "https://horizon-testnet.stellar.org"
+        server = (
+            SorobanServer(server_url="https://mainnet.sorobanrpc.com")
+            if is_production()
+            else Server(horizon_url="https://horizon-testnet.stellar.org")
         )
 
         # load the contract owner's wallet
