@@ -77,7 +77,9 @@ def get_server(
     chain: Optional[Literal["bitcoin", "ethereum", "stellar"]] = "stellar",
 ) -> Server | BTCClient | EthereumClient | None:
     if chain == "stellar":
-        return Server("https://horizon-testnet.stellar.org" if not is_production() else "https://horizon.stellar.org")
+        return Server(
+            "https://horizon-testnet.stellar.org" if not is_production() else "https://mainnet.sorobanrpc.com"
+        )
 
     elif chain == "bitcoin":
         return BTCClient(
@@ -90,7 +92,7 @@ def get_server(
         provider_url = f"{base_url}/{api_key}"
         return EthereumClient(Web3(Web3.HTTPProvider(provider_url)))
 
-    return Server("https://horizon-testnet.stellar.org" if not is_production() else "https://horizon.stellar.org")
+    return Server("https://horizon-testnet.stellar.org" if not is_production() else "https://mainnet.sorobanrpc.com")
 
 
 def get_stellar_asset_account_id():
