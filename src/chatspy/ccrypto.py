@@ -709,8 +709,8 @@ class Contract:
                 wallets.extend(Contract.generate_wallet(asset=asset, daemonize_activation=daemonize_activation))
             return wallets
 
-        if all([asset == Asset.ChatsUSDC, is_production()]):
-            asset = Asset.USDC
+        # if all([asset == Asset.ChatsUSDC, is_production()]):
+        #     asset = Asset.USDC
 
         chain = asset.chain
         wallets = []
