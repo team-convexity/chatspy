@@ -1,5 +1,7 @@
 import os
 from stellar_sdk.exceptions import NotFoundError, BadResponseError
+from stellar_sdk.asset import Asset as StellarAsset
+from stellar_sdk.soroban_rpc import SendTransactionStatus
 from stellar_sdk import Server, SorobanServer, Network, TransactionBuilder, Keypair
 
 from .celery_config import app
@@ -23,7 +25,7 @@ def activate_wallet(account_private: str):
 def _activate_wallet(account_private: str):
     """Create the wallet on mainnet or testnet depending on env mode by sponsoring trustline creations etc"""
 
-    from .ccrypto import STELLAR_USDC_ACCOUNT_ID, Contract
+    from .ccrypto import STELLAR_USDC_ACCOUNT_ID, Contract, Asset, Chain
 
     try:
         # determine the network based on the environment
@@ -33,8 +35,6 @@ def _activate_wallet(account_private: str):
             if is_production()
             else Server(horizon_url="https://horizon-testnet.stellar.org")
         )
-
-        # load the contract owner's wallet
         contract_owner_seed = os.getenv("STELLAR_CONTRACT_OWNER_SEED_PHRASE")
         if not contract_owner_seed:
             raise ValueError("stellar_contract_owner_seed_phrase is not set in the environment.")
@@ -45,34 +45,61 @@ def _activate_wallet(account_private: str):
         account_keypair = Keypair.from_secret(account_private)
 
         if is_production():
-            transaction = (
-                TransactionBuilder(
-                    source_account=source_account,
-                    network_passphrase=network,
-                    base_fee=100,
+            try:
+                create_tx = (
+                    TransactionBuilder(
+                        source_account=source_account,
+                        network_passphrase=network,
+                        base_fee=400,
+                    )
+                    .append_create_account_op(destination=account_keypair.public_key, starting_balance="1.5")
+                    .set_timeout(180)
+                    .build()
                 )
-                .append_begin_sponsoring_future_reserves_op(sponsored_id=account_keypair.public_key)
-                .append_create_account_op(destination=account_keypair.public_key, starting_balance="1")
-                .append_end_sponsoring_future_reserves_op(source=account_keypair.public_key)
-                .set_timeout(30)
-                .build()
-            )
-            # sponsor
-            transaction.sign(contract_owner_keypair)
-            transaction.sign(account_keypair)
-            response = server.submit_transaction(transaction)
-            logger.info(f"sponsored wallet activation for {account_keypair.public_key}: {response}")
+                create_tx.sign(contract_owner_keypair)
+                create_response = server.send_transaction(create_tx)
+                logger.info(f"Initial account creation: {create_response.hash}")
 
-            # sponsor the usdc trustline
-            faucet = StellarFaucet()
-            response = faucet.create_trustline(
-                account_keypair,
-                asset_code="USDC",
-                asset_issuer=STELLAR_USDC_ACCOUNT_ID,
-                sponsor_keypair=contract_owner_keypair,
-            )
-            logger.info(f"sponsored usdc trustline for {account_keypair.public_key}")
-            return response
+                success = Asset.wait_for_transaction_confirmation(
+                    timeout=30,
+                    poll_interval=3,
+                    chain=Chain.STELLAR,
+                    tx_hash=create_response.hash,
+                )
+
+                if not success:
+                    raise Exception("Initial account creation failed")
+
+            except Exception as e:
+                logger.error(f"Initial account creation error: {str(e)}")
+                raise
+
+            try:
+                trustline_tx = (
+                    TransactionBuilder(
+                        source_account=source_account,
+                        network_passphrase=network,
+                        base_fee=300,
+                    )
+                    .append_begin_sponsoring_future_reserves_op(sponsored_id=account_keypair.public_key)
+                    .append_change_trust_op(
+                        asset=StellarAsset("USDC", STELLAR_USDC_ACCOUNT_ID), source=account_keypair.public_key
+                    )
+                    .append_end_sponsoring_future_reserves_op(source=account_keypair.public_key)
+                    .set_timeout(180)
+                    .build()
+                )
+
+                trustline_tx.sign(contract_owner_keypair)
+                trustline_tx.sign(account_keypair)
+
+                trustline_response = server.send_transaction(trustline_tx)
+                logger.info("Sponsored USDC trustline created")
+                return trustline_response
+
+            except Exception as e:
+                logger.error(f"Trustline setup error: {str(e)}")
+                raise
 
         else:
             transaction = (

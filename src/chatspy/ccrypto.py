@@ -34,6 +34,7 @@ from bitcoin.core import x, b2x, lx
 from bitcoin.wallet import CBitcoinSecret, P2PKHBitcoinAddress
 from bitcoin.core.script import CScript, SignatureHash, SIGHASH_ALL
 from bitcoin.core import CMutableTransaction, CMutableTxIn, CMutableTxOut
+from stellar_sdk.soroban_rpc import GetTransactionResponse, GetTransactionStatus
 
 
 from . import tasks
@@ -556,15 +557,34 @@ class Asset(Enum):
                     start_time = time.time()
                     while time.time() - start_time < timeout:
                         try:
-                            tx_data = server.transactions().transaction(transaction_hash=tx_hash).call()
-                            if tx_data.get("successful", False):
-                                logger.i(message=f"Stellar tx {tx_hash[:8]} confirmed")
-                                return True
-                            logger.w(message=f"Stellar tx {tx_hash[:8]} failed")
+                            if isinstance(server, Server):
+                                tx_data = server.transactions().transaction(transaction_hash=tx_hash).call()
+                                if tx_data.get("successful", False):
+                                    logger.i(message=f"Stellar tx {tx_hash[:8]} confirmed")
+                                    return True
+
+                            else:
+                                tx_data: GetTransactionResponse = server.get_transaction(transaction_hash=tx_hash)
+                                if tx_data.status == GetTransactionStatus.NOT_FOUND:
+                                    logger.i(f"Transaction not found {tx_hash} retrying...")
+                                    time.sleep(poll_interval)
+                                    continue
+
+                                elif tx_data.status == GetTransactionStatus.SUCCESS:
+                                    logger.i(message=f"Stellar tx {tx_hash} confirmed")
+                                    return True
+
+                                elif tx_data.status == GetTransactionStatus.FAILED:
+                                    logger.e(f"Transaction Failed to succeed: {tx_hash}")
+                                    logger.e(tx_data.model_dump())
+                                    return False
+
+                            logger.w(message=f"Stellar tx {tx_hash} failed")
                             return False
-                        except NotFoundError:
+                        except (NotFoundError, AccountNotFoundException):
                             time.sleep(poll_interval)
                             continue
+
                         except Exception as e:
                             logger.e(message="Stellar API error", service=Service.PROJECT.value, description=str(e))
                             return None
@@ -777,7 +797,6 @@ class Contract:
                     try:
                         if daemonize_activation:
                             tasks.cactivate_wallet.apply_async(kwargs={"account_private": private_key}, queue="walletQ")
-
                         else:
                             tasks.activate_wallet(account_private=keypair.secret)
 
