@@ -50,9 +50,9 @@ def _activate_wallet(account_private: str):
                     TransactionBuilder(
                         source_account=source_account,
                         network_passphrase=network,
-                        base_fee=400,
+                        base_fee=100,
                     )
-                    .append_create_account_op(destination=account_keypair.public_key, starting_balance="1.5")
+                    .append_create_account_op(destination=account_keypair.public_key, starting_balance="1")
                     .set_timeout(180)
                     .build()
                 )
@@ -79,7 +79,7 @@ def _activate_wallet(account_private: str):
                     TransactionBuilder(
                         source_account=source_account,
                         network_passphrase=network,
-                        base_fee=300,
+                        base_fee=100,
                     )
                     .append_begin_sponsoring_future_reserves_op(sponsored_id=account_keypair.public_key)
                     .append_change_trust_op(
