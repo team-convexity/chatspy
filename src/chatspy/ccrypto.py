@@ -59,11 +59,11 @@ SEPOLIA_ETHEREUM_USDT_CONTRACT_ADDRESS = "0xEEAD57cD7D101FC7ae3635d467175B3f9De6
 
 
 @overload
-def get_server() -> Server | SorobanServer: ...
+def get_server() -> Server: ...
 
 
 @overload
-def get_server(chain: Literal["stellar"]) -> Server | SorobanServer: ...
+def get_server(chain: Literal["stellar"]) -> Server: ...
 
 
 @overload
@@ -79,7 +79,7 @@ def get_server(
 ) -> Server | BTCClient | EthereumClient | None:
     if chain == "stellar":
         return (
-            SorobanServer(server_url="https://mainnet.sorobanrpc.com")
+            Server(horizon_url="https://horizon.stellar.org")
             if is_production()
             else Server(horizon_url="https://horizon-testnet.stellar.org")
         )
@@ -98,7 +98,7 @@ def get_server(
     return (
         Server(horizon_url="https://horizon-testnet.stellar.org")
         if not is_production()
-        else SorobanServer(server_url="https://mainnet.sorobanrpc.com")
+        else Server(horizon_url="https://horizon.stellar.org")
     )
 
 
@@ -557,27 +557,10 @@ class Asset(Enum):
                     start_time = time.time()
                     while time.time() - start_time < timeout:
                         try:
-                            if isinstance(server, Server):
-                                tx_data = server.transactions().transaction(transaction_hash=tx_hash).call()
-                                if tx_data.get("successful", False):
-                                    logger.i(message=f"Stellar tx {tx_hash[:8]} confirmed")
-                                    return True
-
-                            else:
-                                tx_data: GetTransactionResponse = server.get_transaction(transaction_hash=tx_hash)
-                                if tx_data.status == GetTransactionStatus.NOT_FOUND:
-                                    logger.i(f"Transaction not found {tx_hash} retrying...")
-                                    time.sleep(poll_interval)
-                                    continue
-
-                                elif tx_data.status == GetTransactionStatus.SUCCESS:
-                                    logger.i(message=f"Stellar tx {tx_hash} confirmed")
-                                    return True
-
-                                elif tx_data.status == GetTransactionStatus.FAILED:
-                                    logger.e(f"Transaction Failed to succeed: {tx_hash}")
-                                    logger.e(tx_data.model_dump())
-                                    return False
+                            tx_data = server.transactions().transaction(transaction_hash=tx_hash).call()
+                            if tx_data.get("successful", False):
+                                logger.i(message=f"Stellar tx {tx_hash[:8]} confirmed")
+                                return True
 
                             logger.w(message=f"Stellar tx {tx_hash} failed")
                             return False
