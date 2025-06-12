@@ -31,7 +31,7 @@ def _activate_wallet(account_private: str):
         # determine the network based on the environment
         network = Network.PUBLIC_NETWORK_PASSPHRASE if is_production() else Network.TESTNET_NETWORK_PASSPHRASE
         server = (
-            SorobanServer(server_url="https://mainnet.sorobanrpc.com")
+            Server(horizon_url="https://horizon.stellar.org")
             if is_production()
             else Server(horizon_url="https://horizon-testnet.stellar.org")
         )
@@ -50,21 +50,21 @@ def _activate_wallet(account_private: str):
                     TransactionBuilder(
                         source_account=source_account,
                         network_passphrase=network,
-                        base_fee=100,
+                        base_fee=1000,
                     )
                     .append_create_account_op(destination=account_keypair.public_key, starting_balance="1")
                     .set_timeout(180)
                     .build()
                 )
                 create_tx.sign(contract_owner_keypair)
-                create_response = server.send_transaction(create_tx)
-                logger.info(f"Initial account creation: {create_response.hash}")
+                create_response = server.submit_transaction(create_tx)
+                logger.info(f"Initial account creation: {create_response.get('hash')}")
 
                 success = Asset.wait_for_transaction_confirmation(
                     timeout=30,
                     poll_interval=3,
                     chain=Chain.STELLAR,
-                    tx_hash=create_response.hash,
+                    tx_hash=create_response.get("hash"),
                 )
 
                 if not success:
@@ -93,8 +93,8 @@ def _activate_wallet(account_private: str):
                 trustline_tx.sign(contract_owner_keypair)
                 trustline_tx.sign(account_keypair)
 
-                trustline_response = server.send_transaction(trustline_tx)
-                logger.info("Sponsored USDC trustline created")
+                trustline_response = server.submit_transaction(trustline_tx)
+                logger.info(f"Sponsored USDC trustline created for {account_keypair.public_key}")
                 return trustline_response
 
             except Exception as e:
