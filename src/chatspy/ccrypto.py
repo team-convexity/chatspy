@@ -294,7 +294,7 @@ class Asset(Enum):
                     base_fee=BASE_FEE,
                 )
                 fee_bump_tx.sign(sponsor_keypair)
-                response = server.submit_transaction(transaction)
+                response = server.submit_transaction(fee_bump_tx)
                 return response
 
             case Chain.BITCOIN:
