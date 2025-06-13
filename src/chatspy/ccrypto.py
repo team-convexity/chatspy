@@ -266,6 +266,12 @@ class Asset(Enum):
                 source_account = server.load_account(source_keypair.public_key)
                 asset = get_stellar_asset()
 
+                sponsor_owner_seed = os.getenv("STELLAR_CONTRACT_OWNER_SEED_PHRASE")
+                if not sponsor_owner_seed:
+                    raise ValueError("stellar_contract_owner_seed_phrase not set- failed to transfer")
+
+                decrypted_seed = Contract.decrypt_key(sponsor_owner_seed)
+                sponsor_keypair = StellarKeypair.from_mnemonic_phrase(decrypted_seed)
                 transaction = (
                     TransactionBuilder(
                         source_account=source_account,
@@ -279,6 +285,15 @@ class Asset(Enum):
                     .build()
                 )
                 transaction.sign(source_keypair)
+                fee_bump_tx = TransactionBuilder.build_fee_bump_transaction(
+                    fee_source=sponsor_keypair.public_key,
+                    inner_transaction_envelope=transaction,
+                    network_passphrase=Network.PUBLIC_NETWORK_PASSPHRASE
+                    if is_production()
+                    else Network.TESTNET_NETWORK_PASSPHRASE,
+                    base_fee=BASE_FEE,
+                )
+                fee_bump_tx.sign(sponsor_keypair)
                 response = server.submit_transaction(transaction)
                 return response
 
