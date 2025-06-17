@@ -59,6 +59,7 @@ class ClientType(Enum):
     STELLAR_CONTRACT = "stellar_contract"
     CURRENCY_CONVERTER_CLIENT = "currency_converter"
     PAYSTACK_PAYMENT_CLIENT = "paystack_payment_client"
+    KORA_PAYMENT_CLIENT = "kora_payment_client"
 
 
 class ServiceClient:
@@ -610,6 +611,9 @@ class Services:
         if ClientType.PAYSTACK_PAYMENT_CLIENT in http_clients:
             cls.clients[ClientType.PAYSTACK_PAYMENT_CLIENT.value] = PaystackPaymentClient()
 
+        if ClientType.KORA_PAYMENT_CLIENT in http_clients:
+            cls.clients[ClientType.KORA_PAYMENT_CLIENT.value] = KoraPaymentClient()
+
         if ClientType.CURRENCY_CONVERTER_CLIENT in http_clients:
             cls.clients[ClientType.CURRENCY_CONVERTER_CLIENT.value] = CurrencyConverter.configure(
                 fiat_api_key=os.getenv("EXCHANGE_RATE_API_KEY")
@@ -914,6 +918,201 @@ class PaystackPaymentClient(PaymentClient):
                 if attempt == max_retries - 1:
                     raise PaymentError(str(e), "paystack", e)
         raise PaymentError("Transfer status check timed out", "paystack")
+
+
+class KoraPaymentClient(PaymentClient):
+    """
+        Koral payment client
+    """
+    def __init__(self, **kwargs):
+        self.secret_key = os.getenv("KORA_SECRET_KEY")
+        self.public_key = os.getenv("KORA_PUBLIC_KEY")
+        self.client = requests.Session()
+        self.client.headers.update({"Content-Type": "application/json", "Authorization": f"Bearer {self.secret_key}"})
+        self.base_url = "https://api.korapay.com/merchant/api/v1/"
+        self.set_auth_header(self.secret_key)
+
+    def set_auth_header(self,key):
+        self.client.headers.update({
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {key}"
+        })
+
+    def request_with_key(self, method, endpoint, *, use_public_key=False, **kwargs):
+
+        key = self.public_key if use_public_key else self.secret_key
+        self.set_auth_header(key)
+        url = f"{self.base_url}{endpoint}"
+        response = self.client.request(method, url, **kwargs)
+        response.raise_for_status()
+        return response.json()
+
+
+    def initialize(self, payload: Dict[str, Any]) -> requests.Response:
+        try:
+            url= f"{self.base_url}charges/initialize"
+            print(payload)
+            res = self.client.post(url, json=payload)
+            res.raise_for_status()
+            logger.info(f"Transaction initialized successfully: {res.json}")
+            return res.json()
+        except requests.exceptions.RequestException as e:
+            logger.e(f"Initialize failed: {str(e)}")
+            raise PaymentError(str(e), "kora", e)
+
+
+    def query_charge(self, refrence):
+        try:
+
+            res = self.client.post(self.base_url+ "charges/"+refrence)
+            res.raise_for_status()
+            return res.json()
+        except requests.exceptions.RequestException as e:
+            logger.e(f"Query charge failed: {str(e)}")
+            raise PaymentError(str(e), "kora", e)
+        
+
+    def verify_payment(self, reference):
+        pass
+
+    def single_payout(self, payload):
+        try:
+            res = self.client.post(self.base_url + "transactions/disburse", json=payload)
+            res.raise_for_status()
+            logger.info(f"Payout successful: {res.json}")
+            return res.json()
+        except requests.exceptions.RequestException as e:
+            logger.e(f"Payout failed: {str(e)}")
+            raise PaymentError(str(e), "kora", e)
+        
+    def bulk_payout(self, payload):
+        try:
+            res = self.client.post(self.base_url + "transactions/disburse/bulk", json=payload)
+            res.raise_for_status()
+            logger.info(f"Payout successful: {res.json}")
+            return res.json
+        except requests.exceptions.RequestException as e:
+            logger.e(f"Payout failed: {str(e)}")
+            raise PaymentError(str(e), "kora", e)
+
+
+    def query_bulk_payout(self,reference):
+        """
+         Query a bulk payout transactions
+        """
+        try:
+            url = f"{self.base_url}transactions/disburse/bulk/{reference}"
+            res = self.client.get(url)
+            res.raise_for_status()
+            logger.info(f"Query bulk payout successful: {res.json}")
+            return res.json()
+        except requests.exceptions.RequestException as e:
+            logger.e(f"Query bulk payout failed: {str(e)}")
+            raise PaymentError(str(e), "kora", e)
+        
+
+    def bulk_payout_details(self, reference):
+        """
+        
+        """
+        try:
+            url = f"{self.base_url}transactions/disburse/bulk/{reference}"
+            res = self.client.get(url)
+            res.raise_for_status()
+            logger.info(f"bulk payout details successful: {res.json}")
+            return res.json()
+        except requests.exceptions.RequestException as e:
+            logger.e(f"Bulk Payout details failed: {str(e)}")
+            raise PaymentError(str(e), "kora", e)
+        
+
+
+    def verify_payout(self, transaction_reference: str):
+        """
+        Verify Payout Transaction
+
+        GET https://api.korapay.com/merchant/api/v1/transactions/:transactionReference
+        """
+        try:
+            url = f"{self.base_url}transactions/{transaction_reference}"
+            res = self.client.get(url)
+            res.raise_for_status()
+            logger.info(f"Payout verification successful: {res.json()}")
+            return res.json()
+        except requests.exceptions.RequestException as e:
+            logger.e(f"Payout verification failed: {str(e)}")
+            raise PaymentError(str(e), "kora", e)
+        
+
+    def resolve_account(self, payload) -> Dict[str, Any]:
+        """
+        Resolve bank account details using KoraPay API.
+
+        POST https://api.korapay.com/merchant/api/v1/misc/banks/resolve
+
+        Args:
+            account_number (str): The bank account number to resolve.
+            bank_code (str): The bank code.
+
+        Returns:
+            dict: The resolved account details.
+
+        Raises:
+            PaymentError: If the request fails.
+        """
+        try:
+            
+            url = f"{self.base_url}misc/banks/resolve"
+            res = self.client.post(url, json=payload)
+            res.raise_for_status()
+            logger.info(f"Account resolved successfully: {res.json()}")
+            return res.json()
+        except requests.exceptions.RequestException as e:
+            logger.e(f"Account resolve failed: {str(e)}")
+            raise PaymentError(str(e), "kora", e)
+        
+    
+    @staticmethod
+    def calculate_hmac(data: dict, secret: str) -> str:
+        """Calculate HMAC SHA256 signature for Korapay webhook data."""
+   
+        serialized_data = json.dumps(data, separators=(',', ':')).encode('utf-8')
+        return hmac.new(
+            key=secret.encode('utf-8'),
+            msg=serialized_data,
+            digestmod=hashlib.sha256
+        ).hexdigest()
+
+
+    def get_banks(self, country_code: str = "NG", use_public_key: bool = True) -> Dict[str, Any]:
+        """
+        List banks using KoraPay API.
+
+        GET https://api.korapay.com/merchant/api/v1/misc/banks?countryCode=NG
+
+        Args:
+            country_code (str): The country code for which to list banks. Default is "NG".
+
+        Returns:
+            dict: The list of banks.
+
+        Raises:
+            PaymentError: If the request fails.
+        """
+        try:
+            return self.request_with_key("get", f"misc/banks?countryCode={country_code}", use_public_key=True)
+        except requests.exceptions.RequestException as e:
+            logger.e(f"List banks failed: {str(e)}")
+            raise PaymentError(str(e), "kora", e)
+        
+
+
+
+
+
+
+
+        
 
 
 class SMSClient:
