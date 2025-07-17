@@ -650,6 +650,10 @@ class Services:
                 cls.clients[ClientType.STELLAR_CONTRACT.value] = client
                 return client
 
+            case ClientType.KORA_PAYMENT_CLIENT.value:
+                client = cls.clients[ClientType.KORA_PAYMENT_CLIENT.value] = KoraPaymentClient()
+                return client
+
             case _:
                 logger.warning(f"[Reinitialize]: No client match found: {name}")
 
@@ -938,28 +942,35 @@ class KoraPaymentClient(PaymentClient):
             "Authorization": f"Bearer {key}"
         })
 
-    def request_with_key(self, method, endpoint, *, use_public_key=False, **kwargs):
-
+    def _send_api_request(self, endpoint: str, method: str = "POST", max_retries: int = 3, payload:dict = None ,use_public_key:bool=False, **kwargs):
+        """
+        Send an API request with retry and re-authentication on 403 errors.
+        """
         key = self.public_key if use_public_key else self.secret_key
         self.set_auth_header(key)
-        url = f"{self.base_url}{endpoint}"
-        response = self.client.request(method, url, **kwargs)
-        response.raise_for_status()
-        return response.json()
-
+        for attempt in range(max_retries):
+            try:
+                response = self.client.request(method, endpoint, json=payload, **kwargs)
+                response.raise_for_status()
+                logger.info(f"API request to {endpoint} succeeded: {response.json()}")
+                return response.json()
+            except requests.exceptions.RequestException as e:
+                status_code = getattr(e.response, "status_code", None)
+                if status_code == 403:
+                    logger.warning(f"Authentication failed for {endpoint} (attempt {attempt + 1}/{max_retries}). Reinitializing client...")
+                    Services.reinitialize(ClientType.KORA_PAYMENT_CLIENT.value)
+                    if attempt == max_retries - 1:
+                        logger.error(f"Max retries reached. Unable to authenticate for {endpoint}.")
+                        raise PaymentError("Unable to authenticate with Korapay after multiple attempts", "kora", e)
+                else:
+                    logger.error(f"HTTP error occurred: {str(e)}")
+                    raise PaymentError(str(e), "kora", e)
+                
 
     def initialize(self, payload: Dict[str, Any]) -> requests.Response:
-        try:
-            url= f"{self.base_url}charges/initialize"
-            print(payload)
-            res = self.client.post(url, json=payload)
-            res.raise_for_status()
-            logger.info(f"Transaction initialized successfully: {res.json}")
-            return res.json()
-        except requests.exceptions.RequestException as e:
-            logger.e(f"Initialize failed: {str(e)}")
-            raise PaymentError(str(e), "kora", e)
-
+        url= f"{self.base_url}charges/initialize"
+        print(payload)
+        return self._send_api_request(endpoint=url,payload=payload)
 
     def query_charge(self, refrence):
         try:
@@ -976,106 +987,32 @@ class KoraPaymentClient(PaymentClient):
         pass
 
     def single_payout(self, payload):
-        try:
-            res = self.client.post(self.base_url + "transactions/disburse", json=payload)
-            res.raise_for_status()
-            logger.info(f"Payout successful: {res.json}")
-            return res.json()
-        except requests.exceptions.RequestException as e:
-            logger.e(f"Payout failed: {str(e)}")
-            raise PaymentError(str(e), "kora", e)
+            endpoint = f"{self.base_url}payouts/single"
+            return self._send_api_request(endpoint=endpoint, payload=payload)
         
     def bulk_payout(self, payload):
-        try:
-            res = self.client.post(self.base_url + "transactions/disburse/bulk", json=payload)
-            res.raise_for_status()
-            logger.info(f"Payout successful: {res.json}")
-            return res.json
-        except requests.exceptions.RequestException as e:
-            logger.e(f"Payout failed: {str(e)}")
-            raise PaymentError(str(e), "kora", e)
+        endpoint = f"{self.base_url}payouts/bulk"
+        return self._send_api_request(endpoint=endpoint, payload=payload)
 
-
-    def query_bulk_payout(self,reference):
-        """
-         Query a bulk payout transactions
-        """
-        try:
-            url = f"{self.base_url}transactions/disburse/bulk/{reference}"
-            res = self.client.get(url)
-            res.raise_for_status()
-            logger.info(f"Query bulk payout successful: {res.json}")
-            return res.json()
-        except requests.exceptions.RequestException as e:
-            logger.e(f"Query bulk payout failed: {str(e)}")
-            raise PaymentError(str(e), "kora", e)
-        
+    def query_bulk_payout(self, reference):
+        endpoint = f"{self.base_url}payouts/bulk/{reference}"
+        return self._send_api_request(endpoint=endpoint, method="GET")
 
     def bulk_payout_details(self, reference):
-        """
-        
-        """
-        try:
-            url = f"{self.base_url}transactions/disburse/bulk/{reference}"
-            res = self.client.get(url)
-            res.raise_for_status()
-            logger.info(f"bulk payout details successful: {res.json}")
-            return res.json()
-        except requests.exceptions.RequestException as e:
-            logger.e(f"Bulk Payout details failed: {str(e)}")
-            raise PaymentError(str(e), "kora", e)
-        
-
+        endpoint = f"{self.base_url}payouts/bulk/{reference}/transactions"
+        return self._send_api_request(endpoint=endpoint, method="GET")
 
     def verify_payout(self, transaction_reference: str):
-        """
-        Verify Payout Transaction
-
-        GET https://api.korapay.com/merchant/api/v1/transactions/:transactionReference
-        """
-        try:
-            url = f"{self.base_url}transactions/{transaction_reference}"
-            res = self.client.get(url)
-            res.raise_for_status()
-            logger.info(f"Payout verification successful: {res.json()}")
-            return res.json()
-        except requests.exceptions.RequestException as e:
-            logger.e(f"Payout verification failed: {str(e)}")
-            raise PaymentError(str(e), "kora", e)
-        
+        endpoint = f"{self.base_url}transactions/{transaction_reference}"
+        return self._send_api_request(endpoint=endpoint, method="GET")
 
     def resolve_account(self, payload) -> Dict[str, Any]:
-        """
-        Resolve bank account details using KoraPay API.
-
-        POST https://api.korapay.com/merchant/api/v1/misc/banks/resolve
-
-        Args:
-            account_number (str): The bank account number to resolve.
-            bank_code (str): The bank code.
-
-        Returns:
-            dict: The resolved account details.
-
-        Raises:
-            PaymentError: If the request fails.
-        """
-        try:
-            
-            url = f"{self.base_url}misc/banks/resolve"
-            res = self.client.post(url, json=payload)
-            res.raise_for_status()
-            logger.info(f"Account resolved successfully: {res.json()}")
-            return res.json()
-        except requests.exceptions.RequestException as e:
-            logger.e(f"Account resolve failed: {str(e)}")
-            raise PaymentError(str(e), "kora", e)
-        
+        endpoint = f"{self.base_url}misc/banks/resolve"
+        return self._send_api_request(endpoint=endpoint, payload=payload)
     
     @staticmethod
     def calculate_hmac(data: dict, secret: str) -> str:
         """Calculate HMAC SHA256 signature for Korapay webhook data."""
-   
         serialized_data = json.dumps(data, separators=(',', ':')).encode('utf-8')
         return hmac.new(
             key=secret.encode('utf-8'),
@@ -1085,25 +1022,10 @@ class KoraPaymentClient(PaymentClient):
 
 
     def get_banks(self, country_code: str = "NG", use_public_key: bool = True) -> Dict[str, Any]:
-        """
-        List banks using KoraPay API.
-
-        GET https://api.korapay.com/merchant/api/v1/misc/banks?countryCode=NG
-
-        Args:
-            country_code (str): The country code for which to list banks. Default is "NG".
-
-        Returns:
-            dict: The list of banks.
-
-        Raises:
-            PaymentError: If the request fails.
-        """
-        try:
-            return self.request_with_key("get", f"misc/banks?countryCode={country_code}", use_public_key=True)
-        except requests.exceptions.RequestException as e:
-            logger.e(f"List banks failed: {str(e)}")
-            raise PaymentError(str(e), "kora", e)
+        endpoint = f"{self.base_url}misc/banks"
+        params = {"countryCode": country_code}
+        return self._send_api_request(endpoint=endpoint, method="GET", params=params, use_public_key=use_public_key)
+        
         
 
 
