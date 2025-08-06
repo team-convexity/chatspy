@@ -1025,6 +1025,23 @@ class KoraPaymentClient(PaymentClient):
         endpoint = f"{self.base_url}misc/banks"
         params = {"countryCode": country_code}
         return self._send_api_request(endpoint=endpoint, method="GET", params=params, use_public_key=use_public_key)
+
+
+    def verify_bvn(self, payload)-> Dict[str, Any]:
+        endpoint = f"{self.base_url}/identities/ng/bvn"
+        return self._send_api_request(endpoint=endpoint, payload=payload)
+    
+    def verify_nin(self, payload)-> Dict[str, Any]:
+        endpoint = f"{self.base_url}/identities/ng/nin"
+        return self._send_api_request(endpoint=endpoint, payload=payload)
+    
+    def verify_vnin(self, payload)-> Dict[str, Any]:
+        endpoint = f"{self.base_url}/identities/ng/vnin"
+        return self._send_api_request(endpoint=endpoint, payload=payload)
+    
+    def verify_cac(self, payload)-> Dict[str, Any]:
+        endpoint = f"{self.base_url}/identities/ng/cac"
+        return self._send_api_request(endpoint=endpoint, payload=payload)
         
         
 
