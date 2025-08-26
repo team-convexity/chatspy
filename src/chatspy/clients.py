@@ -926,23 +926,29 @@ class PaystackPaymentClient(PaymentClient):
 
 class KoraPaymentClient(PaymentClient):
     """
-        Koral payment client
+    Koral payment client
     """
+
     def __init__(self, **kwargs):
         self.secret_key = os.getenv("KORA_SECRET_KEY")
         self.public_key = os.getenv("KORA_PUBLIC_KEY")
         self.client = requests.Session()
         self.client.headers.update({"Content-Type": "application/json", "Authorization": f"Bearer {self.secret_key}"})
-        self.base_url = "https://api.korapay.com/merchant/api/v1/"
+        self.base_url = "https://api.korapay.com/merchant/api/v1"
         self.set_auth_header(self.secret_key)
 
-    def set_auth_header(self,key):
-        self.client.headers.update({
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {key}"
-        })
+    def set_auth_header(self, key):
+        self.client.headers.update({"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
 
-    def _send_api_request(self, endpoint: str, method: str = "POST", max_retries: int = 3, payload:dict = None ,use_public_key:bool=False, **kwargs):
+    def _send_api_request(
+        self,
+        endpoint: str,
+        method: str = "POST",
+        max_retries: int = 3,
+        payload: dict = None,
+        use_public_key: bool = False,
+        **kwargs,
+    ):
         """
         Send an API request with retry and re-authentication on 403 errors.
         """
@@ -957,7 +963,9 @@ class KoraPaymentClient(PaymentClient):
             except requests.exceptions.RequestException as e:
                 status_code = getattr(e.response, "status_code", None)
                 if status_code == 403:
-                    logger.warning(f"Authentication failed for {endpoint} (attempt {attempt + 1}/{max_retries}). Reinitializing client...")
+                    logger.warning(
+                        f"Authentication failed for {endpoint} (attempt {attempt + 1}/{max_retries}). Reinitializing client..."
+                    )
                     Services.reinitialize(ClientType.KORA_PAYMENT_CLIENT.value)
                     if attempt == max_retries - 1:
                         logger.error(f"Max retries reached. Unable to authenticate for {endpoint}.")
@@ -965,93 +973,74 @@ class KoraPaymentClient(PaymentClient):
                 else:
                     logger.error(f"HTTP error occurred: {str(e)}")
                     raise PaymentError(str(e), "kora", e)
-                
 
     def initialize(self, payload: Dict[str, Any]) -> requests.Response:
-        url= f"{self.base_url}charges/initialize"
+        url = f"{self.base_url}/charges/initialize"
         print(payload)
-        return self._send_api_request(endpoint=url,payload=payload)
+        return self._send_api_request(endpoint=url, payload=payload)
 
     def query_charge(self, refrence):
         try:
-
-            res = self.client.post(self.base_url+ "charges/"+refrence)
+            res = self.client.post(self.base_url + "charges/" + refrence)
             res.raise_for_status()
             return res.json()
         except requests.exceptions.RequestException as e:
             logger.e(f"Query charge failed: {str(e)}")
             raise PaymentError(str(e), "kora", e)
-        
 
     def verify_payment(self, reference):
         pass
 
     def single_payout(self, payload):
-            endpoint = f"{self.base_url}payouts/single"
-            return self._send_api_request(endpoint=endpoint, payload=payload)
-        
+        endpoint = f"{self.base_url}/payouts/single"
+        return self._send_api_request(endpoint=endpoint, payload=payload)
+
     def bulk_payout(self, payload):
-        endpoint = f"{self.base_url}payouts/bulk"
+        endpoint = f"{self.base_url}/payouts/bulk"
         return self._send_api_request(endpoint=endpoint, payload=payload)
 
     def query_bulk_payout(self, reference):
-        endpoint = f"{self.base_url}payouts/bulk/{reference}"
+        endpoint = f"{self.base_url}/payouts/bulk/{reference}"
         return self._send_api_request(endpoint=endpoint, method="GET")
 
     def bulk_payout_details(self, reference):
-        endpoint = f"{self.base_url}payouts/bulk/{reference}/transactions"
+        endpoint = f"{self.base_url}/payouts/bulk/{reference}/transactions"
         return self._send_api_request(endpoint=endpoint, method="GET")
 
     def verify_payout(self, transaction_reference: str):
-        endpoint = f"{self.base_url}transactions/{transaction_reference}"
+        endpoint = f"{self.base_url}/transactions/{transaction_reference}"
         return self._send_api_request(endpoint=endpoint, method="GET")
 
     def resolve_account(self, payload) -> Dict[str, Any]:
-        endpoint = f"{self.base_url}misc/banks/resolve"
+        endpoint = f"{self.base_url}/misc/banks/resolve"
         return self._send_api_request(endpoint=endpoint, payload=payload)
-    
+
     @staticmethod
     def calculate_hmac(data: dict, secret: str) -> str:
         """Calculate HMAC SHA256 signature for Korapay webhook data."""
-        serialized_data = json.dumps(data, separators=(',', ':')).encode('utf-8')
-        return hmac.new(
-            key=secret.encode('utf-8'),
-            msg=serialized_data,
-            digestmod=hashlib.sha256
-        ).hexdigest()
-
+        serialized_data = json.dumps(data, separators=(",", ":")).encode("utf-8")
+        return hmac.new(key=secret.encode("utf-8"), msg=serialized_data, digestmod=hashlib.sha256).hexdigest()
 
     def get_banks(self, country_code: str = "NG", use_public_key: bool = True) -> Dict[str, Any]:
-        endpoint = f"{self.base_url}misc/banks"
+        endpoint = f"{self.base_url}/misc/banks"
         params = {"countryCode": country_code}
         return self._send_api_request(endpoint=endpoint, method="GET", params=params, use_public_key=use_public_key)
 
-
-    def verify_bvn(self, payload)-> Dict[str, Any]:
+    def verify_bvn(self, payload) -> Dict[str, Any]:
         endpoint = f"{self.base_url}/identities/ng/bvn"
         return self._send_api_request(endpoint=endpoint, payload=payload)
-    
-    def verify_nin(self, payload)-> Dict[str, Any]:
+
+    def verify_nin(self, payload) -> Dict[str, Any]:
         endpoint = f"{self.base_url}/identities/ng/nin"
         return self._send_api_request(endpoint=endpoint, payload=payload)
-    
-    def verify_vnin(self, payload)-> Dict[str, Any]:
+
+    def verify_vnin(self, payload) -> Dict[str, Any]:
         endpoint = f"{self.base_url}/identities/ng/vnin"
         return self._send_api_request(endpoint=endpoint, payload=payload)
-    
-    def verify_cac(self, payload)-> Dict[str, Any]:
+
+    def verify_cac(self, payload) -> Dict[str, Any]:
         endpoint = f"{self.base_url}/identities/ng/cac"
         return self._send_api_request(endpoint=endpoint, payload=payload)
-        
-        
-
-
-
-
-
-
-
-        
 
 
 class SMSClient:
