@@ -820,7 +820,7 @@ class PaystackPaymentClient(PaymentClient):
             return res
         except requests.exceptions.RequestException as e:
             logger.error(f"Error initializing transaction: {e}")
-            raise PaymentError(str(e), "paystack", e)
+            raise PaymentError(str(e), "paystack", e, status_code=e.response.status_code if e.response else None)
 
     def verify_transaction(self, reference: str) -> Dict[str, Any]:
         try:
@@ -830,7 +830,7 @@ class PaystackPaymentClient(PaymentClient):
             return res.json()
         except requests.exceptions.RequestException as e:
             logger.error(f"Error verifying transaction: {e}")
-            raise PaymentError(str(e), "paystack", e)
+            raise PaymentError(str(e), "paystack", e, status_code=e.response.status_code if e.response else None)
 
     def transfer(
         self, amount: int, recipient_code: str, reason: str, currency: str = "NGN", account_reference: str = ""
@@ -851,7 +851,7 @@ class PaystackPaymentClient(PaymentClient):
             return res.json()
         except requests.exceptions.RequestException as e:
             logger.error(f"Error initiating transfer: {e}")
-            raise PaymentError(str(e), "paystack", e)
+            raise PaymentError(str(e), "paystack", e, status_code=e.response.status_code if e.response else None)
 
     def get_banks(self, currency: str = "NGN") -> requests.Response:
         try:
@@ -860,7 +860,7 @@ class PaystackPaymentClient(PaymentClient):
             return res
         except requests.exceptions.RequestException as e:
             logger.error(f"Error retrieving banks: {e}")
-            raise PaymentError(str(e), "paystack", e)
+            raise PaymentError(str(e), "paystack", e, status_code=e.response.status_code if e.response else None)
 
     def resolve_account(self, acc_number: str, bank_code: str) -> Dict[str, Any]:
         try:
@@ -872,7 +872,7 @@ class PaystackPaymentClient(PaymentClient):
             return res.json()
         except requests.exceptions.RequestException as e:
             logger.error(f"Error resolving account: {e}")
-            raise PaymentError(str(e), "paystack", e)
+            raise PaymentError(str(e), "paystack", e, status_code=e.response.status_code if e.response else None)
 
     @staticmethod
     def calculate_hmac(data: bytes, secret: str) -> str:
@@ -893,7 +893,7 @@ class PaystackPaymentClient(PaymentClient):
             res.raise_for_status()
             return res.json()["data"]
         except requests.exceptions.RequestException as e:
-            raise PaymentError(str(e), "paystack", e)
+            raise PaymentError(str(e), "paystack", e, status_code=e.response.status_code if e.response else None)
 
     def finalize_transfer(self, transfer_code: str, otp: str) -> Dict[str, Any]:
         try:
@@ -903,7 +903,7 @@ class PaystackPaymentClient(PaymentClient):
             res.raise_for_status()
             return res.json()["data"]
         except requests.exceptions.RequestException as e:
-            raise PaymentError(str(e), "paystack", e)
+            raise PaymentError(str(e), "paystack", e, status_code=e.response.status_code if e.response else None)
 
     def check_transfer_status(self, reference: str, max_retries: int = 5, retry_delay: int = 3) -> Dict[str, Any]:
         for attempt in range(max_retries):
@@ -915,13 +915,16 @@ class PaystackPaymentClient(PaymentClient):
                 if data["status"].lower() == "success":
                     return data
                 if data["status"].lower() in ["failed", "reversed"]:
-                    raise PaymentError(f"Transfer failed: {data['status']}", "paystack")
+                    raise PaymentError(f"Transfer failed: {data['status']}", "paystack", status_code=400)
 
                 time.sleep(retry_delay)
             except requests.exceptions.RequestException as e:
                 if attempt == max_retries - 1:
-                    raise PaymentError(str(e), "paystack", e)
-        raise PaymentError("Transfer status check timed out", "paystack")
+                    raise PaymentError(
+                        str(e), "paystack", e, status_code=e.response.status_code if e.response else None
+                    )
+
+        raise PaymentError("Transfer status check timed out", "paystack", status_code=408)
 
 
 class KoraPaymentClient(PaymentClient):
@@ -969,10 +972,15 @@ class KoraPaymentClient(PaymentClient):
                     Services.reinitialize(ClientType.KORA_PAYMENT_CLIENT.value)
                     if attempt == max_retries - 1:
                         logger.error(f"Max retries reached. Unable to authenticate for {endpoint}.")
-                        raise PaymentError("Unable to authenticate with Korapay after multiple attempts", "kora", e)
+                        raise PaymentError(
+                            "Unable to authenticate with Korapay after multiple attempts",
+                            "kora",
+                            e,
+                            status_code=status_code,
+                        )
                 else:
                     logger.error(f"HTTP error occurred: {str(e)}")
-                    raise PaymentError(str(e), "kora", e)
+                    raise PaymentError(str(e), "kora", e, status_code=status_code)
 
     def initialize(self, payload: Dict[str, Any]) -> requests.Response:
         url = f"{self.base_url}/charges/initialize"
@@ -986,7 +994,7 @@ class KoraPaymentClient(PaymentClient):
             return res.json()
         except requests.exceptions.RequestException as e:
             logger.e(f"Query charge failed: {str(e)}")
-            raise PaymentError(str(e), "kora", e)
+            raise PaymentError(str(e), "kora", e, status_code=e.response.status_code if e.response else None)
 
     def verify_payment(self, reference):
         pass

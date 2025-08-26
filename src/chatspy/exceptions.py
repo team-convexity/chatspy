@@ -258,7 +258,12 @@ class ReentrancyDetected(ContractError):
 
 
 class PaymentError(Exception):
-    def __init__(self, message: str, client: str, original_exception: Optional[Exception] = None):
+    status_code: int = 400
+
+    def __init__(
+        self, message: str, client: str, original_exception: Optional[Exception] = None, status_code: int = 400
+    ):
         super().__init__(f"[{client}] {message}")
         self.client = client
         self.original_exception = original_exception
+        self.status_code = status_code
