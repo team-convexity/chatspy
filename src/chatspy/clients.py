@@ -1160,7 +1160,7 @@ class TermiClient(SMSClient):
         phone: Union[str, list[str]],
         message: str,
         source: str,
-        channel: Literal["dnd", "whatsapp", "generic"] = "generic",
+        channel: Literal["dnd", "whatsapp", "generic"] = "dnd",
         type: str = "plain",
         media_url: Optional[str] = None,
         media_caption: Optional[str] = None,
