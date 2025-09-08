@@ -110,6 +110,8 @@ class SorobanErrorHandler(ErrorHandler):
             1008: (InvalidProjectId, "Invalid Project ID"),
             1009: (RoleAlreadyExists, "Role Already Exists"),
             1011: (ReentrancyDetected, "Reentrancy Detected"),
+            1012: (InvalidInputError, "Invalid input"),
+            1013: (RoleLimitExceededError, "Role member limit exceeded"),
         }
 
         exc_type, message = mapping.get(code, (ContractError, "Unknown contract error"))
@@ -186,7 +188,22 @@ class ContractError(Exception):
             1008: 400,  # InvalidProjectId
             1009: 400,  # RoleAlreadyExists
             1011: 400,  # ReentrancyDetected
+            1012: 400,  # InvalidInput
         }.get(code, 500)  # default to 500 if unknown code
+
+
+class InvalidInputError(ContractError):
+    """Raised when input to contract function is invalid"""
+
+    def __init__(self, message: str = "Invalid input", context: Optional[ContractErrorContext] = None):
+        super().__init__(message, 1012, context)
+
+
+class RoleLimitExceededError(ContractError):
+    """Raised when the role member limit is exceeded"""
+
+    def __init__(self, message: str = "Role member limit exceeded", context: Optional[ContractErrorContext] = None):
+        super().__init__(message, 1013, context)
 
 
 class UnauthorizedError(ContractError):
