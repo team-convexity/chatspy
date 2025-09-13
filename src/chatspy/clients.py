@@ -48,6 +48,7 @@ class KafkaEvent(Enum):
     UserProfileUpdated = "UserProfileUpdated"
     OrganizationCreated = "OrganizationCreated"
     BroadcastTransaction = "BroadcastTransaction"
+    VendorKycVerification = "VendorKycVerification"
 
 
 class ClientType(Enum):
