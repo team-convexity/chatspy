@@ -342,13 +342,15 @@ class ProjectActivityExtractor(ActivityExtractor):
         self, request: Any, response_data: Dict[str, Any], route_params: Optional[Dict[str, Any]] = None
     ) -> ActivityData:
         view_identifier = ActivityMetadataService._get_view_identifier(request)
+        match view_identifier:
+            case "create_project":
+                return self._extract_project_created(request, response_data)
 
-        if view_identifier == "create_project":
-            return self._extract_project_created(request, response_data)
-        elif view_identifier == "update_project_status":
-            return self._extract_status_update(request, response_data, route_params)
-        elif view_identifier == "archive_project":
-            return self._extract_archive(request, response_data, route_params)
+            case "update_project_status":
+                return self._extract_status_update(request, response_data, route_params)
+
+            case "archive_project":
+                return self._extract_archive(request, response_data, route_params)
 
         return ActivityData(
             activity_type="",
