@@ -163,7 +163,8 @@ class ActivityTrackingMiddleware:
             if not hasattr(response, "status_code") or response.status_code >= 400:
                 return False
 
-            return self.activity_service.should_track_endpoint(request)
+            should_track = self.activity_service.should_track_endpoint(request)
+            return should_track
         except Exception as e:
             logger.w("Error checking if request should be tracked", description=str(e))
             return False
@@ -177,13 +178,58 @@ class ActivityTrackingMiddleware:
             if not activity_data:
                 return
 
+            # Try to get user_id from request first
             user_id = None
-            if hasattr(request, "user") and request.user:
-                user_id = getattr(request.user, "id", None)
+            if hasattr(request, "user") and request.user and hasattr(request.user, "id"):
+                user_id = request.user.id
+            
+            # If not on request, try to extract from response data
+            if not user_id:
+                user_id = self._extract_user_id_from_response(response_data)
+            
+            # Decode global ID to Django integer ID if needed
+            if user_id and isinstance(user_id, str):
+                try:
+                    _, user_id = ChatsRecord.from_global_id(user_id)
+                except Exception as e:
+                    logger.w(f"Failed to decode user_id from global ID: {user_id}", description=str(e))
+                    user_id = None
 
             self._emit_activity_event(activity_data, user_id)
         except Exception as e:
             logger.w("Error in _track_activity", description=str(e))
+
+    def _extract_user_id_from_response(self, response_data: dict) -> int | None:
+        """Extract user_id from response data for cases where user isn't authenticated on request"""
+        try:
+            # Common patterns for user data in responses
+            data = response_data.get("data", {})
+            
+            # Direct user_id in data
+            if "user_id" in data:
+                return data["user_id"]
+            
+            # User object in data
+            if "user" in data:
+                user = data["user"]
+                if isinstance(user, dict) and "id" in user:
+                    return user["id"]
+            
+            # User profile with nested user
+            if "user_profile" in data:
+                user_profile = data["user_profile"]
+                if isinstance(user_profile, dict):
+                    if "user" in user_profile:
+                        user = user_profile["user"]
+                        if isinstance(user, dict) and "id" in user:
+                            return user["id"]
+                    if "user_id" in user_profile:
+                        return user_profile["user_id"]
+            
+            return None
+        except Exception as e:
+            logger.w("Error extracting user_id from response", description=str(e))
+            return None
 
     def _extract_response_data(self, response) -> dict:
         try:

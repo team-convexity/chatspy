@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional
 from dataclasses import dataclass, asdict
 
 from .utils import logger
+from .models import ChatsRecord
 
 
 class ActivityCategory(str, Enum):
@@ -89,7 +90,37 @@ class ActivityData:
     endpoint: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        """Convert to dict and decode any global IDs to Django integer IDs"""
+        data = asdict(self)
+
+        # decode ids
+        data["resource_id"] = self._decode_id(data.get("resource_id"))
+        data["project_id"] = self._decode_id(data.get("project_id"))
+
+        if data.get("metadata") and isinstance(data["metadata"], dict):
+            metadata = data["metadata"].copy()
+            for key in ["project_id", "resource_id", "user_id", "organization_id", "beneficiary_id"]:
+                if key in metadata:
+                    metadata[key] = self._decode_id(metadata[key])
+            data["metadata"] = metadata
+
+        return data
+
+    @staticmethod
+    def _decode_id(value: Any) -> Any:
+        """Decode a global ID to Django integer ID if it's a string"""
+        if value is None:
+            return None
+
+        if isinstance(value, str):
+            try:
+                _, decoded_id = ChatsRecord.from_global_id(value)
+                return decoded_id
+            except Exception:
+                # if decoding fails, return original value (might already be a regular string)
+                return value
+
+        return value
 
 
 class ActivityExtractor(ABC):
@@ -178,29 +209,33 @@ class ActivityMetadataService:
         logger.i("ActivityMetadataService initialized")
 
     def extract_activity_metadata(self, request: Any, response_data: Dict[str, Any]) -> Optional[ActivityData]:
-        view_name = self._get_view_name(request)
-        if not view_name:
+        view_identifier = self._get_view_identifier(request)
+        if not view_identifier:
             return None
 
-        extractor = self.registry.get_extractor(view_name)
+        extractor = self.registry.get_extractor(view_identifier)
         if not extractor:
             return None
 
         try:
             route_params = self._get_route_params(request)
             activity_data = extractor.extract(request, response_data, route_params)
-            logger.d(f"Activity extracted: {activity_data.activity_type} - {view_name}")
+            logger.d(f"Activity extracted: {activity_data.activity_type} - {view_identifier}")
             return activity_data
         except Exception as e:
-            logger.e(f"Failed to extract activity for {view_name}", description=str(e))
+            logger.e(f"Failed to extract activity for {view_identifier}", description=str(e))
             return None
 
     @staticmethod
-    def _get_view_name(request: Any) -> Optional[str]:
+    def _get_view_identifier(request: Any) -> Optional[str]:
+        """
+        Get a unique identifier for the view/endpoint.
+        We use the url_name from resolver_match (Django Ninja).
+        """
         if hasattr(request, "resolver_match") and request.resolver_match:
-            func = request.resolver_match.func
-            if hasattr(func, "__module__") and hasattr(func, "__name__"):
-                return f"{func.__module__}.{func.__name__}"
+            url_name = getattr(request.resolver_match, "url_name", None)
+            if url_name:
+                return url_name
         return None
 
     @staticmethod
@@ -210,14 +245,14 @@ class ActivityMetadataService:
         return None
 
     def should_track_endpoint(self, request: Any) -> bool:
-        view_name = self._get_view_name(request)
-        return view_name is not None and self.registry.get_extractor(view_name) is not None
+        view_identifier = self._get_view_identifier(request)
+        return view_identifier is not None and self.registry.get_extractor(view_identifier) is not None
 
 
 class AuthActivityExtractor(ActivityExtractor):
     HANDLED_VIEWS = {
-        "core.api.login",
-        "core.api.register",
+        "login",
+        "register",
     }
 
     def can_handle(self, view_name: str) -> bool:
@@ -226,11 +261,11 @@ class AuthActivityExtractor(ActivityExtractor):
     def extract(
         self, request: Any, response_data: Dict[str, Any], route_params: Optional[Dict[str, Any]] = None
     ) -> ActivityData:
-        view_name = ActivityMetadataService._get_view_name(request)
+        view_identifier = ActivityMetadataService._get_view_identifier(request)
 
-        if view_name == "core.api.login":
+        if view_identifier == "login":
             return self._extract_login(request, response_data)
-        elif view_name == "core.api.register":
+        elif view_identifier == "register":
             return self._extract_registration(request, response_data)
 
         return ActivityData(
@@ -295,9 +330,9 @@ class AuthActivityExtractor(ActivityExtractor):
 
 class ProjectActivityExtractor(ActivityExtractor):
     HANDLED_VIEWS = {
-        "core.api.create_project",
-        "core.api.update_project_status",
-        "core.api.archive_project",
+        "create_project",
+        "update_project_status",
+        "archive_project",
     }
 
     def can_handle(self, view_name: str) -> bool:
@@ -306,13 +341,13 @@ class ProjectActivityExtractor(ActivityExtractor):
     def extract(
         self, request: Any, response_data: Dict[str, Any], route_params: Optional[Dict[str, Any]] = None
     ) -> ActivityData:
-        view_name = ActivityMetadataService._get_view_name(request)
+        view_identifier = ActivityMetadataService._get_view_identifier(request)
 
-        if view_name == "core.api.create_project":
+        if view_identifier == "create_project":
             return self._extract_project_created(request, response_data)
-        elif view_name == "core.api.update_project_status":
+        elif view_identifier == "update_project_status":
             return self._extract_status_update(request, response_data, route_params)
-        elif view_name == "core.api.archive_project":
+        elif view_identifier == "archive_project":
             return self._extract_archive(request, response_data, route_params)
 
         return ActivityData(
@@ -434,12 +469,8 @@ class FinancialActivityExtractor(ActivityExtractor):
     """Handles financial operations (Funding, Withdrawal, Disbursement, Donations)."""
 
     HANDLED_VIEWS = {
-        "core.api.fund_project",
-        "core.api.withdraw_funds",
-        "core.api.disburse_items",
-        "core.api.create_unprocessed_donation",
-        "core.api.fund_organization_wallet",
-        "core.api.create_bulk_beneficiaries",
+        "fund_project",
+        "withdraw_funds",
     }
 
     def can_handle(self, view_name: str) -> bool:
@@ -448,20 +479,12 @@ class FinancialActivityExtractor(ActivityExtractor):
     def extract(
         self, request: Any, response_data: Dict[str, Any], route_params: Optional[Dict[str, Any]] = None
     ) -> ActivityData:
-        view_name = ActivityMetadataService._get_view_name(request)
+        view_identifier = ActivityMetadataService._get_view_identifier(request)
 
-        if view_name == "core.api.fund_project":
+        if view_identifier == "fund_project":
             return self._extract_project_funded(request, response_data)
-        elif view_name == "core.api.withdraw_funds":
+        elif view_identifier == "withdraw_funds":
             return self._extract_withdrawal(request, response_data, route_params)
-        elif view_name == "core.api.disburse_items":
-            return self._extract_disbursement(request, response_data)
-        elif view_name == "core.api.create_unprocessed_donation":
-            return self._extract_donation(request, response_data)
-        elif view_name == "core.api.fund_organization_wallet":
-            return self._extract_org_funding(request, response_data)
-        elif view_name == "core.api.create_bulk_beneficiaries":
-            return self._extract_beneficiary_added(request, response_data)
 
         return ActivityData(
             activity_type="",
@@ -728,8 +751,8 @@ class VerificationActivityExtractor(ActivityExtractor):
     """Handles KYC/verification activities."""
 
     HANDLED_VIEWS = {
-        "core.api.kyc_identity_verification",
-        "core.api.user_kyc",
+        "kyc_identity_verification",
+        "user_kyc_verification",
     }
 
     def can_handle(self, view_name: str) -> bool:
