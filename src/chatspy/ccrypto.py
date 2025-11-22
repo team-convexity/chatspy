@@ -1285,6 +1285,14 @@ class StellarProjectContract(Contract):
             "get_total_cash_allowance", args, caller, project_id=project_ids[0], result_type="balance"
         )
 
+    async def get_total_item_allowance(self, beneficiary: str, caller: StellarKeypair, project_ids: list[str]) -> int:
+        """Sum total item allowance across projects for a beneficiary"""
+        projects = [scval.to_string(id) for id in project_ids]
+        args = [scval.to_address(beneficiary), scval.to_vec(projects)]
+        return await self._query(
+            "get_total_item_allowance", args, caller, project_id=project_ids[0], result_type="balance"
+        )
+
     def get_roles(self, project_id: str) -> Roles:
         """Retrieve role assignments for a project"""
 
