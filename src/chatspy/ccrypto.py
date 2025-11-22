@@ -1210,17 +1210,22 @@ class StellarProjectContract(Contract):
         self, caller: StellarKeypair, project_id: str, allowances: list[Tuple[str, str, int, Optional[int]]]
     ) -> Dict[str, Any]:
         """Batch create/update item allowances"""
-        args = [scval.from_string(project_id)]
-        args = [project_id]
-        for allowee, item_id, quantity, expiry in allowances:
-            args.extend(
-                [
-                    Address(allowee),
-                    item_id,
-                    quantity,
-                    expiry if expiry else None,
-                ]
-            )
+        allowances_vec = scval.to_vec(
+            [
+                scval.to_vec(
+                    [
+                        scval.to_address(allowee),
+                        scval.to_string(item_id),
+                        scval.to_uint64(quantity),
+                        scval.to_timepoint(expiry) if expiry else scval.to_void(),
+                    ]
+                )
+                for allowee, item_id, quantity, expiry in allowances
+            ]
+        )
+
+        args = [scval.to_address(caller.public_key), scval.to_string(project_id), allowances_vec]
+
         return self._invoke("allocate_item_allowances_batch", args, caller)
 
     def transfer_cash_allowance(
