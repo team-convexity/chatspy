@@ -1319,6 +1319,10 @@ class StellarProjectContract(Contract):
         args = [scval.to_string(project_id)]
         return await self._query("get_all_cash_allowances", args, caller, project_id)
 
+    async def get_all_item_allowances(self, project_id: str, caller) -> Dict[str, Any]:
+        args = [scval.to_string(project_id)]
+        return await self._query("get_all_item_allowances", args, caller, project_id)
+
     def claim_cash_allowance(
         self, caller_secret: StellarKeypair, project_id: str, currency: str, amount: int, vendor: Optional[str]
     ) -> Dict[str, Any]:
@@ -1350,11 +1354,11 @@ class StellarProjectContract(Contract):
         return self._invoke(
             "claim_item_allowance",
             [
-                Address(caller_keypair.public_key).to_scval(),
-                Address(vendor).to_scval(),
-                scval.from_string(project_id),
-                scval.from_string(item_id),
-                scval.from_u64(quantity),
+                scval.to_address(caller_keypair.public_key),
+                scval.to_address(vendor),
+                scval.to_string(project_id),
+                scval.to_string(item_id),
+                scval.to_uint64(quantity),
             ],
             caller_keypair,
         )
