@@ -683,6 +683,9 @@ class Contract:
     def claim_item_allowance(
         self, caller: StellarKeypair, vendor: str, project_id: str, item_id: str, quantity: int
     ) -> Dict[str, Any]: ...
+    def claim_item_allowances_batch(
+        self, caller: StellarKeypair, vendor: str, project_id: str, claims: list[Tuple[str, int]]
+    ) -> Dict[str, Any]: ...
     def allocate_cash_allowances_batch(
         self, caller: StellarKeypair, project_id: str, allowances: list[Tuple[str, str, int, Optional[int]]]
     ) -> Dict[str, Any]: ...
@@ -1320,6 +1323,47 @@ class StellarProjectContract(Contract):
                 scval.to_string(currency),
                 scval.to_uint64(int(amount * (10**7))),
                 scval.to_address(vendor) if vendor else scval.to_void(),
+            ],
+            caller_keypair,
+        )
+
+    def claim_item_allowance(
+        self, caller_secret: str, vendor: str, project_id: str, item_id: str, quantity: int
+    ) -> Dict[str, Any]:
+        """
+        Claim item allowance by beneficiaries
+        """
+        caller_keypair = StellarKeypair.from_secret(caller_secret)
+        return self._invoke(
+            "claim_item_allowance",
+            [
+                Address(caller_keypair.public_key).to_scval(),
+                Address(vendor).to_scval(),
+                scval.from_string(project_id),
+                scval.from_string(item_id),
+                scval.from_u64(quantity),
+            ],
+            caller_keypair,
+        )
+
+    def claim_item_allowances_batch(
+        self, caller_secret: str, vendor: str, project_id: str, claims: list[Tuple[str, int]]
+    ) -> Dict[str, Any]:
+        """
+        Claim multiple item allowances in a single transaction.
+        """
+        caller_keypair = StellarKeypair.from_secret(caller_secret)
+        claims_vec = scval.to_vec(
+            [scval.to_vec([scval.to_string(item_id), scval.to_uint64(quantity)]) for item_id, quantity in claims]
+        )
+
+        return self._invoke(
+            "claim_item_allowances_batch",
+            [
+                scval.to_address(caller_keypair.public_key),
+                scval.to_address(vendor),
+                scval.to_string(project_id),
+                claims_vec,
             ],
             caller_keypair,
         )
