@@ -25,7 +25,8 @@ dependencies = [
     "pycountry>=24.6.1",
     "stellar-sdk==13.1.0",
     "celery==5.4.0",
-    "celery-redbeat==2.2.0"
+    "celery-redbeat==2.2.0",
+    "sentry-sdk==2.45.0"
 ]
 
 [project.optional-dependencies]
