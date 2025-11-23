@@ -5,14 +5,22 @@ import json
 import jwt
 import dotenv
 import requests
-from typing import Literal
-from stellar_sdk import Server
+import sentry_sdk
 from gunicorn.config import Config
 from gunicorn.glogging import Logger
 from django.http import HttpResponse
 
 from .secret import Secret
 from .services import Service
+
+sentry_dsn = os.getenv("SENTRY_DSN")
+if sentry_dsn:
+    sentry_sdk.init(
+        dsn=sentry_dsn,
+        traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+        profiles_sample_rate=float(os.getenv("SENTRY_PROFILES_SAMPLE_RATE", "0.1")),
+        environment=os.getenv("SENTRY_ENVIRONMENT", "production"),
+    )
 
 
 def verify_auth_token(token: str, verify: bool = True):
@@ -24,49 +32,51 @@ def health_check(req):
 
 
 class Monitoring:
+    """
+    Monitoring class that uses Sentry for error reporting.
+    This implementation is failure-safe and will never cause the application to crash.
+    """
+
     def __init__(self):
-        self.prep()
-
-    def prep(self, team=None):
-        if team:
-            api_key = os.getenv(f"OPSGENIE_{team}_API_KEY")
-        else:
-            api_key = os.getenv("OPSGENIE_CHATS_API_KEY")
-
-        self.api_url = os.getenv("OPSGENIE_API_URL")
-        self.headers = {"Content-Type": "application/json", "Authorization": f"GenieKey {api_key}"}
+        self.enabled = bool(os.getenv("SENTRY_DSN"))
 
     def alert(self, message, description=None, priority="P3", team=None):
         """
-        Sends an alert to Opsgenie.
+        Sends an alert/event to Sentry.
 
         Args:
             message (str): The alert message.
             description (str): Additional details about the alert.
-            priority (str): Alert priority (e.g., P1, P2, P3, P4, P5).
+            priority (str): Alert priority (P1=error, P2=warning, P3+=info).
+            team (str): Team context (added as a tag).
         Returns:
-            dict: API response.
+            dict: Response status.
         """
+        if not self.enabled:
+            return {"success": False, "error": "Sentry monitoring is not enabled"}
 
-        if not self.api_url:
-            self.prep(team)
+        try:
+            # map priority to Sentry level
+            level_map = {
+                "P1": "error",
+                "P2": "warning",
+            }
+            level = level_map.get(priority, "info")
 
-        if not self.api_url:
-            return {"success": False, "error": "OPSGENIE_API_URL is not set."}
+            with sentry_sdk.push_scope() as scope:
+                if team:
+                    scope.set_tag("team", team)
 
-        data = {"message": message, "priority": priority, "description": description, "responders": []}
+                scope.set_tag("priority", priority)
+                if description:
+                    scope.set_context("details", {"description": description})
 
-        if team:
-            data["responders"].append({"name": team, "type": "team"})
+                sentry_sdk.capture_message(message, level=level)
 
-        else:
-            data["responders"].append({"name": "chats", "type": "team"})
+            return {"success": True, "provider": "sentry"}
 
-        response = requests.post(self.api_url, json=data, headers=self.headers)
-        if response.ok:
-            return {"success": True, "response": response.json()}
-
-        return {"success": False, "error": response.json()}
+        except Exception:
+            return {"success": False, "error": "Failed to send alert"}
 
 
 class Logger(Logger):

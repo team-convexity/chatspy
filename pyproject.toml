@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "chatspy"
-version = "0.2.0"
+version = "0.2.1"
 description = "Common utilities for CHATS services"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -25,7 +25,8 @@ dependencies = [
     "pycountry>=24.6.1",
     "stellar-sdk==13.1.0",
     "celery==5.4.0",
-    "celery-redbeat==2.2.0"
+    "celery-redbeat==2.2.0",
+    "sentry-sdk==2.45.0"
 ]
 
 [project.optional-dependencies]
