@@ -85,16 +85,18 @@ class Logger(Logger):
         self.monitoring = Monitoring()
         super(Logger, self).__init__(cfg)
 
-    def d(self, message):
-        return self.debug(msg=message)
+    def d(self, message, description=None):
+        msg = f"{message}: {description}" if description else message
+        return self.debug(msg=msg)
 
     def e(self, message, service=None, description="Error"):
         self.error(f"{message}: {description}")
         self.monitoring.alert(message=message, priority="P1", description=description, team=service)
         return self.error(msg=f"{message}: {description}")
 
-    def i(self, message):
-        return self.info(msg=message)
+    def i(self, message, description=None):
+        msg = f"{message}: {description}" if description else message
+        return self.info(msg=msg)
 
     def w(self, message, service=None, description="Warning"):
         self.warning(f"{message}: {description}")
