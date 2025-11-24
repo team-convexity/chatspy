@@ -714,20 +714,29 @@ class Contract:
 
     @staticmethod
     def generate_wallet(
-        asset: Asset = Asset.ChatsUSDC, create_all: bool = False, daemonize_activation: bool = False
+        asset: Asset = Asset.ChatsUSDC,
+        create_all: bool = False,
+        daemonize_activation: bool = False,
+        skip_activation: bool = False,
     ) -> list[Dict[str, str]]:
         """
         Generates a wallet appropriate for the specified asset. If `create_all` is True, generates wallets for all supported assets.
 
         :param asset: The asset to generate a wallet for (e.g., Asset.BTC, Asset.USDT)
         :param create_all: Flag to create wallets for all supported assets.
+        :param daemonize_activation: Queue wallet activation asynchronously (only if skip_activation=False)
+        :param skip_activation: Skip wallet activation entirely (no blockchain interaction)
         :return: A list of dictionaries with the wallet details
         """
         logger.info("Generating wallet...")
         if create_all:
             wallets = []
             for asset in Asset:
-                wallets.extend(Contract.generate_wallet(asset=asset, daemonize_activation=daemonize_activation))
+                wallets.extend(
+                    Contract.generate_wallet(
+                        asset=asset, daemonize_activation=daemonize_activation, skip_activation=skip_activation
+                    )
+                )
             return wallets
 
         # if all([asset == Asset.ChatsUSDC, is_production()]):
@@ -796,7 +805,9 @@ class Contract:
                         }
                     )
                     try:
-                        if daemonize_activation:
+                        if skip_activation:
+                            pass
+                        elif daemonize_activation:
                             tasks.cactivate_wallet.apply_async(kwargs={"account_private": private_key}, queue="walletQ")
                         else:
                             tasks.activate_wallet(account_private=keypair.secret)
