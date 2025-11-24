@@ -64,6 +64,10 @@ class ChatsRecord:
         returns:
             tuple: (type_name, django_id)
         """
+        # handle common invalid values from frontend
+        if not encoded_str or encoded_str in ("undefined", "null", "None"):
+            raise ValueError(f"Invalid ID: '{encoded_str}' is not a valid encoded ID")
+
         # add padding for base64 decoding
         padded_str = encoded_str + "=" * ((4 - len(encoded_str) % 4) % 4)
 
