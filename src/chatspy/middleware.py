@@ -182,11 +182,11 @@ class ActivityTrackingMiddleware:
             user_id = None
             if hasattr(request, "user") and request.user and hasattr(request.user, "id"):
                 user_id = request.user.id
-            
+
             # If not on request, try to extract from response data
             if not user_id:
                 user_id = self._extract_user_id_from_response(response_data)
-            
+
             # Decode global ID to Django integer ID if needed
             if user_id and isinstance(user_id, str):
                 try:
@@ -204,17 +204,17 @@ class ActivityTrackingMiddleware:
         try:
             # Common patterns for user data in responses
             data = response_data.get("data", {})
-            
+
             # Direct user_id in data
             if "user_id" in data:
                 return data["user_id"]
-            
+
             # User object in data
             if "user" in data:
                 user = data["user"]
                 if isinstance(user, dict) and "id" in user:
                     return user["id"]
-            
+
             # User profile with nested user
             if "user_profile" in data:
                 user_profile = data["user_profile"]
@@ -225,7 +225,7 @@ class ActivityTrackingMiddleware:
                             return user["id"]
                     if "user_id" in user_profile:
                         return user_profile["user_id"]
-            
+
             return None
         except Exception as e:
             logger.w("Error extracting user_id from response", description=str(e))
@@ -239,9 +239,28 @@ class ActivityTrackingMiddleware:
             content = response.content
             if isinstance(content, bytes):
                 content = content.decode("utf-8")
+
+            if not content or not content.strip():
+                return {}
+
             return json.loads(content)
+        except json.JSONDecodeError as e:
+            status_code = getattr(response, "status_code", "unknown")
+            content_type = (
+                getattr(response, "get", lambda x, default=None: None)("Content-Type")
+                or getattr(response, "_headers", {}).get("content-type", ("", "unknown"))[1]
+            )
+
+            logger.w(
+                "Failed to parse response content for activity tracking - invalid JSON",
+                description=f"JSONDecodeError: {str(e)} | Status: {status_code} | Content-Type: {content_type} | Content preview: {content[:200] if content else 'empty'}",
+            )
+            return {}
         except Exception as e:
-            logger.w("Failed to parse response content for activity tracking", description=str(e))
+            logger.w(
+                "Failed to parse response content for activity tracking - unexpected error",
+                description=f"{type(e).__name__}: {str(e)} | Has content attr: {hasattr(response, 'content')} | Content type: {type(getattr(response, 'content', None))}",
+            )
             return {}
 
     def _emit_activity_event(self, activity_data, user_id):
