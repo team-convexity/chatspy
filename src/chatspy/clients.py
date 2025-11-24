@@ -51,6 +51,7 @@ class KafkaEvent(Enum):
     VendorKycVerification = "VendorKycVerification"
     OrganizationUpdated = "OrganizationUpdated"
     OrganizationDeleted = "OrganizationDeleted"
+    UserDeleted = "UserDeleted"
 
 
 class ClientType(Enum):
