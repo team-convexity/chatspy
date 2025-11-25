@@ -1326,9 +1326,6 @@ class EthereumClient:
     def wait_for_transaction(self, tx_hash: HexStr, timeout: int = 120) -> TxReceipt:
         return self.web3.eth.wait_for_transaction_receipt(tx_hash, timeout=timeout)
 
-    def get_transaction_history(self, address: str) -> list[Dict]:
-        return self.web3.eth.get_transactions_by_address(address)
-
 
 class CurrencyConverter:
     _fiat_api_key = None
