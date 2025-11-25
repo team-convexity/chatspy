@@ -45,6 +45,7 @@ class CeleryConfig:
                 "core.models.process_synced_beneficiaries": {"queue": "walletQ"},
                 "core.tasks.retry_failed_transactions": {"queue": "authQ"},
                 "core.tasks.process_unprocessed_donations": {"queue": "projectQ"},
+                "core.tasks.index_organization_wallet_transactions": {"queue": "projectQ"},
             },
             # Worker settings
             "worker_concurrency": int(os.getenv("CELERY_WORKER_CONCURRENCY", "8")),
