@@ -166,7 +166,7 @@ class Asset(Enum):
         match chain:
             case Chain.BITCOIN:
                 client = get_server(Chain.BITCOIN.value)
-                raw_txs = await asyncio.to_thread(lambda: client.transactions().address(address).call())
+                raw_txs = await asyncio.to_thread(lambda: client.address(address).txs().call())
                 return [
                     {
                         "txid": tx["txid"],
