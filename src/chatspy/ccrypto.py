@@ -166,7 +166,7 @@ class Asset(Enum):
         match chain:
             case Chain.BITCOIN:
                 client = get_server(Chain.BITCOIN.value)
-                raw_txs = await asyncio.to_thread(lambda: client.transactions().address(address).call())
+                raw_txs = await asyncio.to_thread(lambda: client.address(address).txs().call())
                 return [
                     {
                         "txid": tx["txid"],
@@ -183,31 +183,81 @@ class Asset(Enum):
                 ]
 
             case Chain.ETHEREUM:
-                client = get_server("ethereum")
-                w3 = client.web3
-                txs = await asyncio.to_thread(lambda: w3.eth.get_transactions_by_address(address))
+                api_key = os.getenv("ALCHEMY_API_KEY")
+                base_url = (
+                    "https://eth-mainnet.g.alchemy.com/v2"
+                    if is_production()
+                    else "https://eth-sepolia.g.alchemy.com/v2"
+                )
+
+                def fetch_alchemy_txs():
+                    if not api_key:
+                        logger.warning("Alchemy API key not set")
+                        return []
+
+                    url = f"{base_url}/{api_key}"
+                    payload = {"jsonrpc": "2.0", "id": 1, "method": "eth_blockNumber", "params": []}
+                    response = requests.post(url, json=payload)
+                    latest_block = int(response.json()["result"], 16)
+
+                    # fetch transactions from last ~30 days (assuming ~12s per block)
+                    from_block = max(0, latest_block - 216000)  # ~30 days
+                    payload = {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "alchemy_getAssetTransfers",
+                        "params": [
+                            {
+                                "fromBlock": hex(from_block),
+                                "toBlock": "latest",
+                                "fromAddress": address,
+                                "category": ["external", "internal", "erc20", "erc721", "erc1155"],
+                                "withMetadata": True,
+                                "excludeZeroValue": False,
+                                "maxCount": "0x3e8",  # 1000 transactions
+                            }
+                        ],
+                    }
+                    response = requests.post(url, json=payload)
+                    sent_txs = response.json().get("result", {}).get("transfers", [])
+
+                    # also fetch received transactions
+                    payload["params"][0]["fromAddress"] = None
+                    payload["params"][0]["toAddress"] = address
+                    response = requests.post(url, json=payload)
+                    received_txs = response.json().get("result", {}).get("transfers", [])
+
+                    return sent_txs + received_txs
+
+                transfers = await asyncio.to_thread(fetch_alchemy_txs)
 
                 history = []
-                for tx in txs:
-                    receipt = await asyncio.to_thread(lambda: w3.eth.get_transaction_receipt(tx["hash"]))
-                    block = await asyncio.to_thread(lambda: w3.eth.get_block(tx["blockNumber"]))
-                    is_token_transfer = len(tx["input"]) > 10 and receipt and len(receipt["logs"]) > 0
+                seen_hashes = set()
+
+                for transfer in transfers:
+                    tx_hash = transfer.get("hash")
+                    if not tx_hash or tx_hash in seen_hashes:
+                        continue
+                    seen_hashes.add(tx_hash)
+
+                    metadata = transfer.get("metadata", {})
                     history.append(
                         {
-                            "to": tx["to"],
-                            "from": tx["from"],
-                            "hash": tx["hash"].hex(),
-                            "value": str(tx["value"]),
-                            "gas_price": str(tx["gasPrice"]),
-                            "block_number": tx["blockNumber"],
-                            "is_token_transfer": is_token_transfer,
-                            "status": receipt["status"] if receipt else None,
-                            "timestamp": block["timestamp"] if block else None,
-                            "gas_used": receipt["gasUsed"] if receipt else None,
+                            "to": transfer.get("to"),
+                            "from": transfer.get("from"),
+                            "hash": tx_hash,
+                            "value": str(int(float(transfer.get("value", 0)) * 1e18)) if transfer.get("value") else "0",
+                            "gas_price": "0",  # Not available in asset transfers
+                            "block_number": int(transfer.get("blockNum", "0x0"), 16),
+                            "is_token_transfer": transfer.get("category") in ["erc20", "erc721", "erc1155"],
+                            "status": 1,  # Alchemy only returns successful transfers
+                            "timestamp": metadata.get("blockTimestamp"),
+                            "gas_used": None,
+                            "asset": transfer.get("asset"),
+                            "category": transfer.get("category"),
                         }
                     )
 
-                # sort by block number (descending)
                 history.sort(key=lambda x: x["block_number"] or 0, reverse=True)
 
                 return history
