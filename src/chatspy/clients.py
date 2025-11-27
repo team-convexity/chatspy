@@ -1203,7 +1203,8 @@ class EndpointBuilder:
         self.path = path
 
     def __getattr__(self, name: str) -> "EndpointBuilder":
-        return EndpointBuilder(self.client, f"{self.path}/{name}")
+        new_path = f"{self.path}/{name}".rstrip("/")
+        return EndpointBuilder(self.client, new_path)
 
     def __call__(self, *args) -> "EndpointBuilder":
         """Handle path arguments like .address('...')"""
@@ -1240,6 +1241,9 @@ class BTCClient:
             response.raise_for_status()
             return response.json()
 
+        except requests.exceptions.HTTPError:
+            # re-raise HTTPError to allow proper status code handling upstream
+            raise
         except requests.RequestException as e:
             raise Exception(f"API request failed: {e}")
 
