@@ -1208,7 +1208,10 @@ class EndpointBuilder:
 
     def __call__(self, *args) -> "EndpointBuilder":
         """Handle path arguments like .address('...')"""
-        new_path = f"{self.path}/{'/'.join(str(arg) for arg in args)}"
+        if args:
+            new_path = f"{self.path}/{'/'.join(str(arg) for arg in args)}"
+        else:
+            new_path = self.path
         return EndpointBuilder(self.client, new_path.lstrip("/"))
 
     def call(self, **params) -> Any:
