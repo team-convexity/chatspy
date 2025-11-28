@@ -1244,11 +1244,10 @@ class BTCClient:
             response.raise_for_status()
             return response.json()
 
-        except requests.exceptions.HTTPError:
-            # re-raise HTTPError to allow proper status code handling upstream
-            raise
+        except requests.exceptions.HTTPError as e:
+            raise Exception(f"API request failed with status {e.response.status_code}: {url}") from e
         except requests.RequestException as e:
-            raise Exception(f"API request failed: {e}")
+            raise Exception(f"API request failed: {url} - {e}") from e
 
     def get_fee_estimates(self) -> Dict[str, float]:
         """
