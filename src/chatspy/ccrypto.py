@@ -7,7 +7,7 @@ import requests
 from enum import Enum
 from decimal import Decimal
 from dataclasses import dataclass
-from typing import Optional, Dict, Any, Tuple, Literal, NoReturn, overload
+from typing import Optional, Dict, Any, Tuple, Literal, NoReturn, overload, List
 
 import boto3
 from eth_keys import keys
@@ -1211,6 +1211,19 @@ class StellarProjectContract(Contract):
             caller,
         )
 
+    def add_roles_batch(self, caller: StellarKeypair, project_id: str, role: int, members: List[str]) -> Dict[str, Any]:
+        """Add multiple roles to project members in a single transaction. Maximum 200 members per batch."""
+        return self._invoke(
+            "add_roles_batch",
+            [
+                scval.to_address(caller.public_key),
+                scval.to_uint64(IDMapper.to_contract_id(project_id)),
+                scval.to_uint32(role),
+                scval.to_vec([scval.to_address(member) for member in members]),
+            ],
+            caller,
+        )
+
     def remove_role(self, caller: StellarKeypair, project_id: str, role: int, member: str) -> Dict[str, Any]:
         """Remove a role from a project member. Role should be one of: ROLE_SUPER_ADMIN, ROLE_ADMIN, ROLE_NGO, ROLE_VENDOR, ROLE_BENEFICIARY"""
         return self._invoke(
@@ -1220,6 +1233,19 @@ class StellarProjectContract(Contract):
                 scval.to_uint64(IDMapper.to_contract_id(project_id)),
                 scval.to_uint32(role),
                 Address(member).to_scval(),
+            ],
+            caller,
+        )
+
+    def remove_roles_batch(self, caller: StellarKeypair, project_id: str, role: int, members: List[str]) -> Dict[str, Any]:
+        """Remove multiple roles from project members in a single transaction. Maximum 200 members per batch."""
+        return self._invoke(
+            "remove_roles_batch",
+            [
+                scval.to_address(caller.public_key),
+                scval.to_uint64(IDMapper.to_contract_id(project_id)),
+                scval.to_uint32(role),
+                scval.to_vec([scval.to_address(member) for member in members]),
             ],
             caller,
         )
