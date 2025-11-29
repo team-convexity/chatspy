@@ -4,6 +4,21 @@ import struct
 import hashlib
 
 
+class IDMapper:
+    @staticmethod
+    def to_contract_id(global_id: str) -> int:
+        _, numeric_id = ChatsRecord.from_global_id(global_id)
+        if numeric_id < 0 or numeric_id > 2**63 - 1:
+            raise ValueError(f"ID {numeric_id} out of range for u64 (0 to {2**63 - 1})")
+        return numeric_id
+
+    @staticmethod
+    def from_contract_id(contract_id: int, type_name: str) -> str:
+        if contract_id < 0 or contract_id > 2**63 - 1:
+            raise ValueError(f"Contract ID {contract_id} out of range")
+        return ChatsRecord.to_global_id(type_name, contract_id, deterministic=True)
+
+
 class ChatsRecord:
     @staticmethod
     def resolve_id(obj, deterministic=False):

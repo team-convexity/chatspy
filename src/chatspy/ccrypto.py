@@ -47,15 +47,18 @@ from .exceptions import (
     ContractParsingError,
     SimulationErrorHandler,
 )
+from .models import IDMapper
 from .services import Service
-from .clients import BTCClient, EthereumClient, TokenInfo
 from .utils import logger, is_production
+from .clients import BTCClient, EthereumClient, TokenInfo
 
-STELLAR_USDC_ACCOUNT_ID = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"  # mainnet
-TEST_STELLAR_USDC_ACCOUNT_ID = "GBMAXTTNYNTJJCNUKZZBJLQD2ASIGZ3VBJT2HHX272LK7W4FPJCBEAYR"  # testnet.
+STELLAR_USDC_ACCOUNT_ID = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+TEST_STELLAR_USDC_ACCOUNT_ID = "GBMAXTTNYNTJJCNUKZZBJLQD2ASIGZ3VBJT2HHX272LK7W4FPJCBEAYR"
 
-ETHEREUM_USDT_CONTRACT_ADDRESS = "0xdAC17F958D2ee523a2206206994597C13D831ec7"  # mainnet
-SEPOLIA_ETHEREUM_USDT_CONTRACT_ADDRESS = "0xEEAD57cD7D101FC7ae3635d467175B3f9De68312"  # testnet.
+ETHEREUM_USDT_CONTRACT_ADDRESS = "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+SEPOLIA_ETHEREUM_USDT_CONTRACT_ADDRESS = "0xEEAD57cD7D101FC7ae3635d467175B3f9De68312"
+
+MAX_IDENTIFIER_LENGTH = 6
 
 
 @overload
@@ -1013,6 +1016,13 @@ class StellarProjectContract(Contract):
         self.parser = SorbanResultParser()
         self.error_handler = self._create_error_handler()
 
+    @staticmethod
+    def _validate_identifier(identifier: str, field_name: str):
+        if len(identifier) > MAX_IDENTIFIER_LENGTH:
+            raise ValueError(f"{field_name} must be {MAX_IDENTIFIER_LENGTH} characters or less, got: {identifier}")
+        if not identifier.strip():
+            raise ValueError(f"{field_name} cannot be empty")
+
     def _create_error_handler(self) -> ErrorHandler:
         # chain error handlers
         return SorobanErrorHandler(SimulationErrorHandler(FallbackErrorHandler()))
@@ -1174,12 +1184,11 @@ class StellarProjectContract(Contract):
         return self._invoke("unpause_contract", [Address(caller.public_key).to_scval()], caller)
 
     def add_role(self, caller: StellarKeypair, project_id: str, role: str, member: str) -> Dict[str, Any]:
-        """Add member to a specific project role"""
         return self._invoke(
             "add_role",
             [
                 scval.to_address(caller.public_key),
-                scval.to_string(project_id),
+                scval.to_uint64(IDMapper.to_contract_id(project_id)),
                 scval.to_string(role),
                 scval.to_address(member),
             ],
@@ -1187,13 +1196,12 @@ class StellarProjectContract(Contract):
         )
 
     def remove_role(self, caller: StellarKeypair, project_id: str, role: str, member: str) -> Dict[str, Any]:
-        """Remove member from a project role"""
         return self._invoke(
             "remove_role",
             [
                 Address(caller.public_key).to_scval(),
-                scval.from_string(project_id),
-                scval.from_string(role),
+                scval.to_uint64(IDMapper.to_contract_id(project_id)),
+                scval.to_string(role),
                 Address(member).to_scval(),
             ],
             caller,
@@ -1208,11 +1216,11 @@ class StellarProjectContract(Contract):
         caller_secret: str,
         expiry: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """Create or update a cash allowance"""
+        self._validate_identifier(currency, "currency")
         caller = StellarKeypair.from_secret(caller_secret)
         args = [
             scval.to_address(caller.public_key),
-            scval.to_string(project_id),
+            scval.to_uint64(IDMapper.to_contract_id(project_id)),
             scval.to_address(allowee),
             scval.to_uint64(int(amount * (10**7))),
             scval.to_string(currency),
@@ -1229,14 +1237,14 @@ class StellarProjectContract(Contract):
         quantity: int,
         expiry: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """Create or update an item allowance"""
+        self._validate_identifier(item_id, "item_id")
         args = [
             Address(caller.public_key).to_scval(),
-            scval.from_string(project_id),
+            scval.to_uint64(IDMapper.to_contract_id(project_id)),
             Address(allowee).to_scval(),
-            scval.from_string(item_id),
-            scval.from_u64(quantity),
-            scval.from_u64(expiry) if expiry else scval.from_void(),
+            scval.to_string(item_id),
+            scval.to_uint64(quantity),
+            scval.to_timepoint(expiry) if expiry else scval.to_void(),
         ]
         return self._invoke("allocate_item_allowance", args, caller)
 
@@ -1246,7 +1254,8 @@ class StellarProjectContract(Contract):
         caller_secret: str,
         allowances: list[Tuple[str, str, int, Optional[int]]],
     ) -> Dict[str, Any]:
-        """Batch create/update cash allowances"""
+        for _, currency, _, _ in allowances:
+            self._validate_identifier(currency, "currency")
 
         caller = StellarKeypair.from_secret(caller_secret)
         allowances_vec = scval.to_vec(
@@ -1263,14 +1272,20 @@ class StellarProjectContract(Contract):
             ]
         )
 
-        args = [scval.to_address(caller.public_key), scval.to_string(project_id), allowances_vec]
+        args = [
+            scval.to_address(caller.public_key),
+            scval.to_uint64(IDMapper.to_contract_id(project_id)),
+            allowances_vec,
+        ]
 
         return self._invoke("allocate_cash_allowances_batch", args, caller)
 
     def allocate_item_allowances_batch(
         self, caller: StellarKeypair, project_id: str, allowances: list[Tuple[str, str, int, Optional[int]]]
     ) -> Dict[str, Any]:
-        """Batch create/update item allowances"""
+        for _, item_id, _, _ in allowances:
+            self._validate_identifier(item_id, "item_id")
+
         allowances_vec = scval.to_vec(
             [
                 scval.to_vec(
@@ -1285,20 +1300,24 @@ class StellarProjectContract(Contract):
             ]
         )
 
-        args = [scval.to_address(caller.public_key), scval.to_string(project_id), allowances_vec]
+        args = [
+            scval.to_address(caller.public_key),
+            scval.to_uint64(IDMapper.to_contract_id(project_id)),
+            allowances_vec,
+        ]
 
         return self._invoke("allocate_item_allowances_batch", args, caller)
 
     def transfer_cash_allowance(
         self, caller_secret: StellarKeypair, project_id: str, new_allowee: str, currency: str, amount: int
     ) -> Dict[str, Any]:
-        """Transfer cash allowance between beneficiaries"""
+        self._validate_identifier(currency, "currency")
         caller = StellarKeypair.from_secret(caller_secret)
         return self._invoke(
             "transfer_cash_allowance",
             [
                 scval.to_address(caller.public_key),
-                scval.to_string(project_id),
+                scval.to_uint64(IDMapper.to_contract_id(project_id)),
                 scval.to_address(new_allowee),
                 scval.to_string(currency),
                 scval.to_uint64(int(amount * (10**7))),
@@ -1309,15 +1328,15 @@ class StellarProjectContract(Contract):
     def transfer_item_allowance(
         self, caller: StellarKeypair, project_id: str, new_allowee: str, item_id: str, quantity: int
     ) -> Dict[str, Any]:
-        """Transfer item allowance between beneficiaries"""
+        self._validate_identifier(item_id, "item_id")
         return self._invoke(
             "transfer_item_allowance",
             [
                 Address(caller.public_key).to_scval(),
-                scval.from_string(project_id),
+                scval.to_uint64(IDMapper.to_contract_id(project_id)),
                 Address(new_allowee).to_scval(),
-                scval.from_string(item_id),
-                scval.from_u64(quantity),
+                scval.to_string(item_id),
+                scval.to_uint64(quantity),
             ],
             caller,
         )
@@ -1325,12 +1344,12 @@ class StellarProjectContract(Contract):
     def redeem_item_claims(
         self, vendor: StellarKeypair, project_id: Optional[str], item_id: str, quantity: int
     ) -> Dict[str, Any]:
-        """Redeem vendor item claims"""
+        self._validate_identifier(item_id, "item_id")
         args = [
             Address(vendor.public_key).to_scval(),
-            scval.from_string(project_id) if project_id else scval.from_void(),
-            scval.from_string(item_id),
-            scval.from_u64(quantity),
+            scval.to_uint64(IDMapper.to_contract_id(project_id)) if project_id else scval.to_uint64(1),
+            scval.to_string(item_id),
+            scval.to_uint64(quantity),
         ]
         return self._invoke("redeem_item_claims", args, vendor)
 
@@ -1345,15 +1364,14 @@ class StellarProjectContract(Contract):
         return Allowance(amount=entry.data.get("amount", 0), expiry=entry.data.get("expiry"))
 
     async def get_total_cash_allowance(self, beneficiary: str, caller: StellarKeypair, project_ids: list[str]) -> int:
-        projects = [scval.to_string(id) for id in project_ids]
+        projects = [scval.to_uint64(IDMapper.to_contract_id(id)) for id in project_ids]
         args = [scval.to_address(beneficiary), scval.to_vec(projects)]
         return await self._query(
             "get_total_cash_allowance", args, caller, project_id=project_ids[0], result_type="balance"
         )
 
     async def get_total_item_allowance(self, beneficiary: str, caller: StellarKeypair, project_ids: list[str]) -> int:
-        """Sum total item allowance across projects for a beneficiary"""
-        projects = [scval.to_string(id) for id in project_ids]
+        projects = [scval.to_uint64(IDMapper.to_contract_id(id)) for id in project_ids]
         args = [scval.to_address(beneficiary), scval.to_vec(projects)]
         return await self._query(
             "get_total_item_allowance", args, caller, project_id=project_ids[0], result_type="balance"
@@ -1377,27 +1395,23 @@ class StellarProjectContract(Contract):
         )
 
     async def get_all_cash_allowances(self, project_id: str, caller) -> Dict[str, Any]:
-        args = [scval.to_string(project_id)]
+        args = [scval.to_uint64(IDMapper.to_contract_id(project_id))]
         return await self._query("get_all_cash_allowances", args, caller, project_id)
 
     async def get_all_item_allowances(self, project_id: str, caller) -> Dict[str, Any]:
-        args = [scval.to_string(project_id)]
+        args = [scval.to_uint64(IDMapper.to_contract_id(project_id))]
         return await self._query("get_all_item_allowances", args, caller, project_id)
 
     def claim_cash_allowance(
         self, caller_secret: StellarKeypair, project_id: str, currency: str, amount: int, vendor: Optional[str]
     ) -> Dict[str, Any]:
-        """
-        Claim cash allowance by beneficiaries
-
-        Vendor is optional, the beneficiary's allowance is debited and the vendor is credited if vendor is supplied, otherwise the beneficiary gets debited and that's it.
-        """
+        self._validate_identifier(currency, "currency")
         caller_keypair = StellarKeypair.from_secret(caller_secret)
         return self._invoke(
             "claim_cash_allowance",
             [
                 scval.to_address(caller_keypair.public_key),
-                scval.to_string(project_id),
+                scval.to_uint64(IDMapper.to_contract_id(project_id)),
                 scval.to_string(currency),
                 scval.to_uint64(int(amount * (10**7))),
                 scval.to_address(vendor) if vendor else scval.to_void(),
@@ -1408,16 +1422,14 @@ class StellarProjectContract(Contract):
     def claim_item_allowance(
         self, caller_secret: str, vendor: str, project_id: str, item_id: str, quantity: int
     ) -> Dict[str, Any]:
-        """
-        Claim item allowance by beneficiaries
-        """
+        self._validate_identifier(item_id, "item_id")
         caller_keypair = StellarKeypair.from_secret(caller_secret)
         return self._invoke(
             "claim_item_allowance",
             [
                 scval.to_address(caller_keypair.public_key),
                 scval.to_address(vendor),
-                scval.to_string(project_id),
+                scval.to_uint64(IDMapper.to_contract_id(project_id)),
                 scval.to_string(item_id),
                 scval.to_uint64(quantity),
             ],
@@ -1427,9 +1439,9 @@ class StellarProjectContract(Contract):
     def claim_item_allowances_batch(
         self, caller_secret: str, vendor: str, project_id: str, claims: list[Tuple[str, int]]
     ) -> Dict[str, Any]:
-        """
-        Claim multiple item allowances in a single transaction.
-        """
+        for item_id, _ in claims:
+            self._validate_identifier(item_id, "item_id")
+
         caller_keypair = StellarKeypair.from_secret(caller_secret)
         claims_vec = scval.to_vec(
             [scval.to_vec([scval.to_string(item_id), scval.to_uint64(quantity)]) for item_id, quantity in claims]
@@ -1440,7 +1452,7 @@ class StellarProjectContract(Contract):
             [
                 scval.to_address(caller_keypair.public_key),
                 scval.to_address(vendor),
-                scval.to_string(project_id),
+                scval.to_uint64(IDMapper.to_contract_id(project_id)),
                 claims_vec,
             ],
             caller_keypair,
@@ -1449,16 +1461,13 @@ class StellarProjectContract(Contract):
     def redeem_cash_claims(
         self, vendor_secret: StellarKeypair, project_id: str, currency: str, amount: int
     ) -> Dict[str, Any]:
-        """
-        Claim cash allowance by beneficiaries
-        """
-
+        self._validate_identifier(currency, "currency")
         caller_keypair = StellarKeypair.from_secret(vendor_secret)
         return self._invoke(
             "redeem_cash_claims",
             [
                 scval.to_address(caller_keypair.public_key),
-                scval.to_string(project_id),
+                scval.to_uint64(IDMapper.to_contract_id(project_id)),
                 scval.to_string(currency),
                 scval.to_uint64(int(amount * (10**7))),
             ],
