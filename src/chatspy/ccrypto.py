@@ -1101,11 +1101,11 @@ class StellarProjectContract(Contract):
                 prepared_tx = self.server.prepare_transaction(inner_tx, sim_resp)
                 prepared_tx.sign(signer)
 
-                inner_tx_fee = int(prepared_tx.transaction.fee)
+                min_resource_fee = int(sim_resp.min_resource_fee)
                 inner_ops_count = len(prepared_tx.transaction.operations)
 
-                per_op_fee = (inner_tx_fee + inner_ops_count - 1) // inner_ops_count
-                fee_bump_base_fee = per_op_fee + (per_op_fee * 15 // 100) + 10_000
+                per_op_fee = (min_resource_fee + inner_ops_count - 1) // inner_ops_count
+                fee_bump_base_fee = per_op_fee + (per_op_fee * 20 // 100) + 70_000
 
                 fee_bump_tx = TransactionBuilder.build_fee_bump_transaction(
                     fee_source=sponsor.public_key,
