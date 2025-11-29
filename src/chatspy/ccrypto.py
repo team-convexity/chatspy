@@ -60,6 +60,13 @@ SEPOLIA_ETHEREUM_USDT_CONTRACT_ADDRESS = "0xEEAD57cD7D101FC7ae3635d467175B3f9De6
 
 MAX_IDENTIFIER_LENGTH = 6
 
+# Contract role constants (must match Rust contract)
+ROLE_SUPER_ADMIN = 0
+ROLE_ADMIN = 1
+ROLE_NGO = 2
+ROLE_VENDOR = 3
+ROLE_BENEFICIARY = 4
+
 
 @overload
 def get_server() -> Server: ...
@@ -720,8 +727,8 @@ class Contract:
     """
 
     def initialize(self, owner: StellarKeypair) -> Dict[str, Any]: ...
-    def add_role(self, caller: StellarKeypair, project_id: str, role: str, new_member: str) -> Dict[str, Any]: ...
-    def remove_role(self, caller: StellarKeypair, project_id: str, role: str, member: str) -> Dict[str, Any]: ...
+    def add_role(self, caller: StellarKeypair, project_id: str, role: int, new_member: str) -> Dict[str, Any]: ...
+    def remove_role(self, caller: StellarKeypair, project_id: str, role: int, member: str) -> Dict[str, Any]: ...
     def pause_contract(self, caller: StellarKeypair) -> Dict[str, Any]: ...
     def unpause_contract(self, caller: StellarKeypair) -> Dict[str, Any]: ...
     def allocate_cash_allowance(
@@ -1183,25 +1190,27 @@ class StellarProjectContract(Contract):
         """Resume contract operations"""
         return self._invoke("unpause_contract", [Address(caller.public_key).to_scval()], caller)
 
-    def add_role(self, caller: StellarKeypair, project_id: str, role: str, member: str) -> Dict[str, Any]:
+    def add_role(self, caller: StellarKeypair, project_id: str, role: int, member: str) -> Dict[str, Any]:
+        """Add a role to a project member. Role should be one of: ROLE_SUPER_ADMIN, ROLE_ADMIN, ROLE_NGO, ROLE_VENDOR, ROLE_BENEFICIARY"""
         return self._invoke(
             "add_role",
             [
                 scval.to_address(caller.public_key),
                 scval.to_uint64(IDMapper.to_contract_id(project_id)),
-                scval.to_string(role),
+                scval.to_uint32(role),
                 scval.to_address(member),
             ],
             caller,
         )
 
-    def remove_role(self, caller: StellarKeypair, project_id: str, role: str, member: str) -> Dict[str, Any]:
+    def remove_role(self, caller: StellarKeypair, project_id: str, role: int, member: str) -> Dict[str, Any]:
+        """Remove a role from a project member. Role should be one of: ROLE_SUPER_ADMIN, ROLE_ADMIN, ROLE_NGO, ROLE_VENDOR, ROLE_BENEFICIARY"""
         return self._invoke(
             "remove_role",
             [
                 Address(caller.public_key).to_scval(),
                 scval.to_uint64(IDMapper.to_contract_id(project_id)),
-                scval.to_string(role),
+                scval.to_uint32(role),
                 Address(member).to_scval(),
             ],
             caller,
