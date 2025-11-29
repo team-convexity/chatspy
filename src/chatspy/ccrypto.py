@@ -34,7 +34,6 @@ from bitcoin.core import x, b2x, lx
 from bitcoin.wallet import CBitcoinSecret, P2PKHBitcoinAddress
 from bitcoin.core.script import CScript, SignatureHash, SIGHASH_ALL
 from bitcoin.core import CMutableTransaction, CMutableTxIn, CMutableTxOut
-from stellar_sdk.soroban_rpc import GetTransactionResponse, GetTransactionStatus
 
 
 from . import tasks
@@ -1237,7 +1236,9 @@ class StellarProjectContract(Contract):
             caller,
         )
 
-    def remove_roles_batch(self, caller: StellarKeypair, project_id: str, role: int, members: List[str]) -> Dict[str, Any]:
+    def remove_roles_batch(
+        self, caller: StellarKeypair, project_id: str, role: int, members: List[str]
+    ) -> Dict[str, Any]:
         """Remove multiple roles from project members in a single transaction. Maximum 200 members per batch."""
         return self._invoke(
             "remove_roles_batch",
@@ -1350,6 +1351,44 @@ class StellarProjectContract(Contract):
         ]
 
         return self._invoke("allocate_item_allowances_batch", args, caller)
+
+    def revoke_item_allowances_batch(
+        self, caller: StellarKeypair, project_id: str, revocations: List[Tuple[str, str]]
+    ) -> Dict[str, Any]:
+        """Revoke multiple item allowances (compensation function)."""
+        for _, item_id in revocations:
+            self._validate_identifier(item_id, "item_id")
+
+        revocations_vec = scval.to_vec(
+            [scval.to_vec([scval.to_address(allowee), scval.to_string(item_id)]) for allowee, item_id in revocations]
+        )
+
+        args = [
+            scval.to_address(caller.public_key),
+            scval.to_uint64(IDMapper.to_contract_id(project_id)),
+            revocations_vec,
+        ]
+
+        return self._invoke("revoke_item_allowances_batch", args, caller)
+
+    def revoke_cash_allowances_batch(
+        self, caller: StellarKeypair, project_id: str, revocations: List[Tuple[str, str]]
+    ) -> Dict[str, Any]:
+        """Revoke multiple cash allowances (compensation function)."""
+        for _, currency in revocations:
+            self._validate_identifier(currency, "currency")
+
+        revocations_vec = scval.to_vec(
+            [scval.to_vec([scval.to_address(allowee), scval.to_string(currency)]) for allowee, currency in revocations]
+        )
+
+        args = [
+            scval.to_address(caller.public_key),
+            scval.to_uint64(IDMapper.to_contract_id(project_id)),
+            revocations_vec,
+        ]
+
+        return self._invoke("revoke_cash_allowances_batch", args, caller)
 
     def transfer_cash_allowance(
         self, caller_secret: StellarKeypair, project_id: str, new_allowee: str, currency: str, amount: int
