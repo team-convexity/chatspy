@@ -1098,18 +1098,30 @@ class StellarProjectContract(Contract):
                 if sim_resp.error:
                     self._handle_error(context)
 
-                prepared_tx = self.server.prepare_transaction(inner_tx, sim_resp)
-                prepared_tx.sign(signer)
+                # apply simulation results to inner transaction manually
+                if sim_resp.transaction_data:
+                    inner_tx.transaction.soroban_data = xdr.SorobanTransactionData.from_xdr(sim_resp.transaction_data)
 
+                # set auth entries if present
+                if sim_resp.results and len(sim_resp.results) > 0:
+                    result = sim_resp.results[0]
+                    if result.auth:
+                        op = inner_tx.transaction.operations[0]
+                        op.auth = [xdr.SorobanAuthorizationEntry.from_xdr(auth) for auth in result.auth]
+
+                # sign the inner transaction
+                inner_tx.sign(signer)
+
+                # calculate fee bump base fee from simulation
                 min_resource_fee = int(sim_resp.min_resource_fee)
-                inner_ops_count = len(prepared_tx.transaction.operations)
+                inner_ops_count = len(inner_tx.transaction.operations)
 
                 per_op_fee = (min_resource_fee + inner_ops_count - 1) // inner_ops_count
-                fee_bump_base_fee = per_op_fee + (per_op_fee * 20 // 100) + 70_000
+                fee_bump_base_fee = per_op_fee + (per_op_fee * 50 // 100) + 100_000
 
                 fee_bump_tx = TransactionBuilder.build_fee_bump_transaction(
                     fee_source=sponsor.public_key,
-                    inner_transaction_envelope=prepared_tx,
+                    inner_transaction_envelope=inner_tx,
                     network_passphrase=self.network_passphrase,
                     base_fee=fee_bump_base_fee,
                 )
