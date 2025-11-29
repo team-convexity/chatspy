@@ -1103,7 +1103,9 @@ class StellarProjectContract(Contract):
 
                 inner_tx_fee = int(prepared_tx.transaction.fee)
                 inner_ops_count = len(prepared_tx.transaction.operations)
-                fee_bump_base_fee = (inner_tx_fee // inner_ops_count) + 200
+
+                per_op_fee = inner_tx_fee // inner_ops_count
+                fee_bump_base_fee = per_op_fee + (per_op_fee // 10) + 1000
 
                 fee_bump_tx = TransactionBuilder.build_fee_bump_transaction(
                     fee_source=sponsor.public_key,
@@ -1111,9 +1113,9 @@ class StellarProjectContract(Contract):
                     network_passphrase=self.network_passphrase,
                     base_fee=fee_bump_base_fee,
                 )
-                fee_bump_tx.sign(sponsor)
 
                 # send
+                fee_bump_tx.sign(sponsor)
                 resp = self.server.send_transaction(fee_bump_tx)
                 return self._parse_response(resp)
 
