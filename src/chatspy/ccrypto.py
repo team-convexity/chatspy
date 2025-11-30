@@ -87,10 +87,11 @@ class StellarBatchManager:
 
     RPC_ENDPOINTS = [
         "https://rpc.lightsail.network/",
-        "https://stellar-mainnet.liquify.com/api=41EEWAH79Y5OCGI7/mainnet",
         "https://stellar-soroban-public.nodies.app",
         "https://archive-rpc.lightsail.network/",
-        # non public; activate later when needed:
+        # Removed liquify endpoint - JSON parse errors, possibly incorrect API key format
+        # "https://stellar-mainnet.liquify.com/api=41EEWAH79Y5OCGI7/mainnet",
+        # Removed endpoints requiring API keys:
         # "https://stellar.api.onfinality.io/public",
         # "https://soroban-mainnet.stellar.validationcloud.io",
         # "https://mainnet.stellar.validationcloud.io",
@@ -1144,9 +1145,16 @@ class SorbanResultParser:
         return data
 
     def _extract_allowances(self, sc_val: xdr.SCVal) -> Dict[str, Any]:
-        """Extract allowances from the SCVal"""
+        """Extract allowances from Vec<(Address, String, Allowance)> response"""
         allowances = {}
-        if sc_val.type == xdr.SCValType.SCV_MAP:
+        if sc_val.type == xdr.SCValType.SCV_VEC:
+            vec_items = scval.to_native(sc_val)
+            for item in vec_items:
+                address, currency_or_item, allowance_data = item
+                if address.address not in allowances:
+                    allowances[address.address] = {}
+                allowances[address.address][currency_or_item] = allowance_data
+        elif sc_val.type == xdr.SCValType.SCV_MAP:
             for map_entry in sc_val.map.sc_map:
                 key: list[Address, str] = scval.to_native(map_entry.key)
                 value = scval.to_native(map_entry.val)
@@ -1642,12 +1650,28 @@ class StellarProjectContract(Contract):
             beneficiaries=entry.data.get("beneficiaries", []),
         )
 
-    async def get_all_cash_allowances(self, project_id: str, caller) -> Dict[str, Any]:
-        args = [scval.to_uint64(IDMapper.to_contract_id(project_id))]
+    async def get_all_cash_allowances(self, project_id: str, caller, addresses: list[str] = None, currencies: list[str] = None) -> Dict[str, Any]:
+        if addresses is None:
+            addresses = []
+        if currencies is None:
+            currencies = []
+        args = [
+            scval.to_uint64(IDMapper.to_contract_id(project_id)),
+            scval.to_vec([scval.to_address(addr) for addr in addresses]),
+            scval.to_vec([scval.to_string(curr) for curr in currencies])
+        ]
         return await self._query("get_all_cash_allowances", args, caller, project_id)
 
-    async def get_all_item_allowances(self, project_id: str, caller) -> Dict[str, Any]:
-        args = [scval.to_uint64(IDMapper.to_contract_id(project_id))]
+    async def get_all_item_allowances(self, project_id: str, caller, addresses: list[str] = None, item_ids: list[str] = None) -> Dict[str, Any]:
+        if addresses is None:
+            addresses = []
+        if item_ids is None:
+            item_ids = []
+        args = [
+            scval.to_uint64(IDMapper.to_contract_id(project_id)),
+            scval.to_vec([scval.to_address(addr) for addr in addresses]),
+            scval.to_vec([scval.to_string(item) for item in item_ids])
+        ]
         return await self._query("get_all_item_allowances", args, caller, project_id)
 
     def claim_cash_allowance(
