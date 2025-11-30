@@ -1,9 +1,8 @@
 from typing import List, Dict, Any, Optional, Callable
 from dataclasses import dataclass
 from stellar_sdk.soroban_rpc import SendTransactionResponse
-import logging
 
-logger = logging.getLogger(__name__)
+from .utils import logger
 
 
 @dataclass
@@ -51,13 +50,11 @@ class BlockchainCompensationManager:
                 }
             )
 
-            logger.info(
-                f"Blockchain operation succeeded: {operation_name}, hash: {result.hash}"
-            )
+            logger.i(f"Blockchain operation succeeded: {operation_name}, hash: {result.hash}")
             return result
 
         except Exception as e:
-            logger.error(f"Blockchain operation failed: {operation_name}, error: {e}")
+            logger.e(f"Blockchain operation failed: {operation_name}, error: {e}")
             raise
 
     def compensate_all(self) -> List[Dict[str, Any]]:
@@ -67,7 +64,7 @@ class BlockchainCompensationManager:
         while self.compensation_stack:
             compensation = self.compensation_stack.pop()
             try:
-                logger.info(f"Executing compensation for: {compensation.operation}")
+                logger.i(f"Executing compensation for: {compensation.operation}")
                 result = compensation.execute()
                 results.append(
                     {
@@ -77,7 +74,7 @@ class BlockchainCompensationManager:
                     }
                 )
             except Exception as e:
-                logger.error(f"Compensation failed for {compensation.operation}: {e}")
+                logger.e(f"Compensation failed for {compensation.operation}", description=f"{e}")
                 results.append(
                     {
                         "operation": compensation.operation,
@@ -102,9 +99,7 @@ class BatchedCompensationManager(BlockchainCompensationManager):
         self.batch_size = batch_size
         self.pending_batch: List[Any] = []
 
-    def add_to_batch(
-        self, item: Any, contract_method: str, reverse_method: str, **kwargs
-    ):
+    def add_to_batch(self, item: Any, contract_method: str, reverse_method: str, **kwargs):
         """
         Add item to pending batch. Auto-flushes when batch size reached.
 
