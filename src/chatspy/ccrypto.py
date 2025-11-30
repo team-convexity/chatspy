@@ -27,6 +27,12 @@ from stellar_sdk import (
     Asset as StellarAsset,
     Keypair as StellarKeypair,
 )
+from tenacity import (
+    retry,
+    wait_exponential,
+    stop_after_attempt,
+    retry_if_exception_type,
+)
 from web3 import Web3
 from bitcoin import params
 from bitcoin import SelectParams
@@ -38,6 +44,7 @@ from bitcoin.core import CMutableTransaction, CMutableTxIn, CMutableTxOut
 
 from . import tasks
 from .exceptions import (
+    RPCError,
     ErrorHandler,
     ContractError,
     SorobanErrorHandler,
@@ -57,14 +64,171 @@ TEST_STELLAR_USDC_ACCOUNT_ID = "GBMAXTTNYNTJJCNUKZZBJLQD2ASIGZ3VBJT2HHX272LK7W4F
 ETHEREUM_USDT_CONTRACT_ADDRESS = "0xdAC17F958D2ee523a2206206994597C13D831ec7"
 SEPOLIA_ETHEREUM_USDT_CONTRACT_ADDRESS = "0xEEAD57cD7D101FC7ae3635d467175B3f9De68312"
 
+MAX_BATCH_SIZE = 50
 MAX_IDENTIFIER_LENGTH = 6
 
-# Contract role constants (must match Rust contract)
-ROLE_SUPER_ADMIN = 0
-ROLE_ADMIN = 1
+# contract role constants (must match soroban contract)
 ROLE_NGO = 2
+ROLE_ADMIN = 1
 ROLE_VENDOR = 3
+ROLE_SUPER_ADMIN = 0
 ROLE_BENEFICIARY = 4
+
+
+class StellarBatchManager:
+    """
+    Manages Stellar batch submissions with RPC rotation and automatic retry.
+
+    - Round-robin RPC endpoint selection
+    - Automatic retry on ERROR status (up to 5 attempts)
+    - RPC switching on each retry attempt
+    - Performance tracking per endpoint
+    """
+
+    RPC_ENDPOINTS = [
+        "https://rpc.lightsail.network/",
+        "https://stellar-mainnet.liquify.com/api=41EEWAH79Y5OCGI7/mainnet",
+        "https://stellar-soroban-public.nodies.app",
+        "https://stellar.api.onfinality.io/public",
+        "https://archive-rpc.lightsail.network/",
+        "https://soroban-mainnet.stellar.validationcloud.io",
+        "https://mainnet.stellar.validationcloud.io",
+    ]
+
+    def __init__(self):
+        self.contract_id = os.getenv("STELLAR_CONTRACT_ID")
+        self.network_passphrase = os.getenv(
+            "STELLAR_NETWORK_PASSPHRASE", "Public Global Stellar Network ; September 2015"
+        )
+        if not self.contract_id:
+            raise ValueError("STELLAR_CONTRACT_ID environment variable is required")
+
+        self.current_rpc_index = 0
+        self.rpc_stats = {rpc: {"success": 0, "error": 0, "exception": 0} for rpc in self.RPC_ENDPOINTS}
+
+    def get_next_rpc(self) -> str:
+        """Get next RPC endpoint in round-robin sequence"""
+        rpc = self.RPC_ENDPOINTS[self.current_rpc_index]
+        self.current_rpc_index = (self.current_rpc_index + 1) % len(self.RPC_ENDPOINTS)
+        return rpc
+
+    def get_rpc_by_index(self, index: int) -> str:
+        """Get RPC endpoint by index for deterministic batch assignment"""
+        return self.RPC_ENDPOINTS[index % len(self.RPC_ENDPOINTS)]
+
+    def record_rpc_result(self, rpc: str, status: str):
+        """Track RPC endpoint performance"""
+        if status == "success":
+            self.rpc_stats[rpc]["success"] += 1
+        elif status == "error":
+            self.rpc_stats[rpc]["error"] += 1
+        else:
+            self.rpc_stats[rpc]["exception"] += 1
+
+    def get_rpc_performance(self) -> List[Dict[str, Any]]:
+        """Get RPC performance metrics sorted by success rate"""
+        performance = []
+        for rpc, stats in self.rpc_stats.items():
+            total = stats["success"] + stats["error"] + stats["exception"]
+            if total > 0:
+                success_rate = (stats["success"] / total) * 100
+                rpc_display = rpc.split("/")[2] if "://" in rpc else rpc[:40]
+                performance.append(
+                    {
+                        "rpc": rpc_display,
+                        "full_url": rpc,
+                        "total": total,
+                        "success": stats["success"],
+                        "error": stats["error"],
+                        "exception": stats["exception"],
+                        "success_rate": success_rate,
+                    }
+                )
+        performance.sort(key=lambda x: x["success_rate"], reverse=True)
+        return performance
+
+    def submit_batch_with_retry(
+        self,
+        allowances: List[Tuple[str, str, int, Optional[int]]],
+        project_id: str,
+        caller: StellarKeypair,
+        batch_num: int = 0,
+    ) -> Dict[str, Any]:
+        """
+        Submit batch with automatic retry and RPC rotation.
+
+        Returns:
+            Dict with: {
+                'status': SendTransactionStatus,
+                'hash': str,
+                'retries': int,
+                'rpc_used': str
+            }
+        """
+        current_rpc = self.get_rpc_by_index(batch_num)
+        attempt_counter = {"count": 0, "rpc_used": current_rpc}
+
+        @retry(
+            stop=stop_after_attempt(5),
+            wait=wait_exponential(multiplier=1, min=2, max=10),
+            retry=retry_if_exception_type(RPCError),
+            reraise=True,
+        )
+        def _submit():
+            attempt_counter["count"] += 1
+            current_attempt = attempt_counter["count"]
+
+            if current_attempt > 1:
+                retry_rpc_index = (batch_num + current_attempt - 1) % len(self.RPC_ENDPOINTS)
+                new_rpc = self.RPC_ENDPOINTS[retry_rpc_index]
+                attempt_counter["rpc_used"] = new_rpc
+                contract = StellarProjectContract(
+                    contract_id=self.contract_id, network_passphrase=self.network_passphrase, rpc_url=new_rpc
+                )
+            else:
+                contract = StellarProjectContract(
+                    contract_id=self.contract_id, network_passphrase=self.network_passphrase, rpc_url=current_rpc
+                )
+
+            try:
+                result = contract.allocate_item_allowances_batch(
+                    allowances=allowances,
+                    project_id=project_id,
+                    caller=caller,
+                )
+
+                tx_status = getattr(result, "status", "unknown")
+                if "ERROR" in str(tx_status):
+                    error_xdr = getattr(result, "error_result_xdr", "N/A")
+                    raise RPCError(f"RPC returned ERROR status: {error_xdr}")
+
+                return result
+
+            except RPCError:
+                raise
+
+            except Exception as e:
+                raise RPCError(f"Transaction failed: {str(e)}")
+
+        try:
+            result = _submit()
+            final_rpc = attempt_counter["rpc_used"]
+            self.record_rpc_result(final_rpc, "success")
+
+            return {
+                "status": result.status,
+                "hash": result.hash,
+                "retries": attempt_counter["count"] - 1,
+                "rpc_used": final_rpc,
+            }
+
+        except RPCError as e:
+            final_rpc = attempt_counter["rpc_used"]
+            if "ERROR status" in str(e):
+                self.record_rpc_result(final_rpc, "error")
+            else:
+                self.record_rpc_result(final_rpc, "exception")
+            raise
 
 
 @overload
@@ -1298,6 +1462,7 @@ class StellarProjectContract(Contract):
         caller_secret: str,
         allowances: list[Tuple[str, str, int, Optional[int]]],
     ) -> Dict[str, Any]:
+        """Allocate multiple cash allowances in a single transaction."""
         for _, currency, _, _ in allowances:
             self._validate_identifier(currency, "currency")
 

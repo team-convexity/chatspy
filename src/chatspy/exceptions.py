@@ -274,6 +274,12 @@ class ReentrancyDetected(ContractError):
         super().__init__(message, 1011, context)
 
 
+class RPCError(Exception):
+    """Exception raised when RPC returns ERROR status, triggers retry"""
+
+    pass
+
+
 class PaymentError(Exception):
     status_code: int = 400
 
