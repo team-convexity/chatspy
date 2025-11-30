@@ -89,10 +89,11 @@ class StellarBatchManager:
         "https://rpc.lightsail.network/",
         "https://stellar-mainnet.liquify.com/api=41EEWAH79Y5OCGI7/mainnet",
         "https://stellar-soroban-public.nodies.app",
-        "https://stellar.api.onfinality.io/public",
         "https://archive-rpc.lightsail.network/",
-        "https://soroban-mainnet.stellar.validationcloud.io",
-        "https://mainnet.stellar.validationcloud.io",
+        # non public; activate later when needed:
+        # "https://stellar.api.onfinality.io/public",
+        # "https://soroban-mainnet.stellar.validationcloud.io",
+        # "https://mainnet.stellar.validationcloud.io",
     ]
 
     def __init__(self):
