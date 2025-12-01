@@ -1150,15 +1150,24 @@ class TermiClient(SMSClient):
         self.headers = {"Content-Type": "application/json"}
 
     def post(self, endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        url = f"{self.base_url}/{endpoint.lstrip('/')}"
-        authenticated_payload = payload.copy()
-        authenticated_payload["api_key"] = self.api_key
-        if self.api_secret:
-            authenticated_payload["api_secret"] = self.api_secret
+        try:
+            url = f"{self.base_url}/{endpoint.lstrip('/')}"
+            authenticated_payload = payload.copy()
+            authenticated_payload["api_key"] = self.api_key
+            if self.api_secret:
+                authenticated_payload["api_secret"] = self.api_secret
 
-        response = requests.post(url, headers=self.headers, json=authenticated_payload)
-        response.raise_for_status()
-        return response.json()
+            response = requests.post(url, headers=self.headers, json=authenticated_payload)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.HTTPError as e:
+            text = e.response.text if hasattr(e, "response") and e.response is not None else ""
+            status = e.response.status_code if hasattr(e, "response") and e.response is not None else "N/A"
+            raise Exception(f"Termii API request failed with status {status}: {url}\n {text}") from e
+        except requests.RequestException as e:
+            text = e.response.text if hasattr(e, "response") and e.response is not None else ""
+            status = e.response.status_code if hasattr(e, "response") and e.response is not None else "N/A"
+            raise Exception(f"Termii API request failed: {url}\n{text} - {e}") from e
 
     def send_sms(
         self,
