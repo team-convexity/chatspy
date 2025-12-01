@@ -1161,13 +1161,13 @@ class TermiClient(SMSClient):
             response.raise_for_status()
             return response.json()
         except requests.exceptions.HTTPError as e:
-            raise Exception(
-                f"Termii API request failed with status {e.response.status_code}: {url}\n {e.response.text if hasattr(e, 'response') and e.response is not None else ''}"
-            ) from e
+            text = e.response.text if hasattr(e, "response") and e.response is not None else ""
+            status = e.response.status_code if hasattr(e, "response") and e.response is not None else "N/A"
+            raise Exception(f"Termii API request failed with status {status}: {url}\n {text}") from e
         except requests.RequestException as e:
-            raise Exception(
-                f"Termii API request failed: {url}\n{e.response.text if hasattr(e, 'response') and e.response is not None else ''} - {e}"
-            ) from e
+            text = e.response.text if hasattr(e, "response") and e.response is not None else ""
+            status = e.response.status_code if hasattr(e, "response") and e.response is not None else "N/A"
+            raise Exception(f"Termii API request failed: {url}\n{text} - {e}") from e
 
     def send_sms(
         self,
