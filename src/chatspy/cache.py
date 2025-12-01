@@ -1,107 +1,135 @@
 """
-Resilient cache utilities that gracefully handle Redis failures.
-Falls back to local memory cache when Redis is unavailable.
+Fail-open Redis cache backend. Returns defaults on Redis failures.
 """
-import asyncio
-from typing import Any, Optional
-from django.core.cache import cache, caches
-from django.core.cache.backends.base import BaseCache
 
-from chatspy.utils import logger
+import logging
+from django.core.cache.backends.redis import RedisCache
+
+logger = logging.getLogger(__name__)
 
 
-class ResilientCache:
-    """
-    A cache wrapper that gracefully handles Redis connection failures.
-    Automatically falls back to local memory cache when Redis is unavailable.
-    """
+class RedisCacheBackend(RedisCache):
+    """Graceful Redis cache - returns defaults when Redis is unavailable."""
 
-    def __init__(self):
-        self._fallback_data = {}
-
-    def _get_cache(self) -> BaseCache:
+    def __init__(self, server, params):
+        self._redis_available = True
         try:
-            return cache
-        except Exception:
-            return None
-
-    def _get_fallback(self) -> Optional[BaseCache]:
-        try:
-            return caches["fallback"]
-        except Exception:
-            return None
-
-    def get(self, key: str, default: Any = None) -> Any:
-        try:
-            result = cache.get(key, default)
-            return result
+            super().__init__(server, params)
         except Exception as e:
-            logger.e(f"[Cache] Redis get failed for {key}: {e}")
-            fallback = self._get_fallback()
-            if fallback:
-                return fallback.get(key, default)
-            return self._fallback_data.get(key, default)
+            logger.warning(f"[Cache] Redis init failed: {e}")
+            self._redis_available = False
 
-    def set(self, key: str, value: Any, timeout: Optional[int] = 300) -> bool:
+    def get(self, key, default=None, version=None):
+        if not self._redis_available:
+            return default
         try:
-            cache.set(key, value, timeout)
-            return True
+            return super().get(key, default=default, version=version)
         except Exception as e:
-            logger.e(f"[Cache] Redis set failed for {key}: {e}")
-            fallback = self._get_fallback()
-            if fallback:
-                fallback.set(key, value, timeout)
-                return True
-            self._fallback_data[key] = value
-            return True
+            logger.warning(f"[Cache] Redis get failed for {key}: {e}")
+            return default
 
-    def delete(self, key: str) -> bool:
+    def set(self, key, value, timeout=None, version=None):
+        if not self._redis_available:
+            return False
         try:
-            cache.delete(key)
-            return True
+            return super().set(key, value, timeout=timeout, version=version)
         except Exception as e:
-            logger.e(f"[Cache] Redis delete failed for {key}: {e}")
-            fallback = self._get_fallback()
-            if fallback:
-                fallback.delete(key)
-            self._fallback_data.pop(key, None)
-            return True
+            logger.warning(f"[Cache] Redis set failed for {key}: {e}")
+            return False
 
-    async def aget(self, key: str, default: Any = None) -> Any:
+    def delete(self, key, version=None):
+        if not self._redis_available:
+            return False
         try:
-            result = await cache.aget(key, default)
-            return result
+            return super().delete(key, version=version)
         except Exception as e:
-            logger.e(f"[Cache] Redis aget failed for {key}: {e}")
-            fallback = self._get_fallback()
-            if fallback:
-                return await asyncio.to_thread(fallback.get, key, default)
-            return self._fallback_data.get(key, default)
+            logger.warning(f"[Cache] Redis delete failed for {key}: {e}")
+            return False
 
-    async def aset(self, key: str, value: Any, timeout: Optional[int] = 300) -> bool:
+    def clear(self):
+        if not self._redis_available:
+            return
         try:
-            await cache.aset(key, value, timeout)
-            return True
+            return super().clear()
         except Exception as e:
-            logger.e(f"[Cache] Redis aset failed for {key}: {e}")
-            fallback = self._get_fallback()
-            if fallback:
-                await asyncio.to_thread(fallback.set, key, value, timeout)
-                return True
-            self._fallback_data[key] = value
-            return True
+            logger.warning(f"[Cache] Redis clear failed: {e}")
 
-    async def adelete(self, key: str) -> bool:
+    def get_many(self, keys, version=None):
+        if not self._redis_available:
+            return {}
         try:
-            await cache.adelete(key)
-            return True
+            return super().get_many(keys, version=version)
         except Exception as e:
-            logger.e(f"[Cache] Redis adelete failed for {key}: {e}")
-            fallback = self._get_fallback()
-            if fallback:
-                await asyncio.to_thread(fallback.delete, key)
-            self._fallback_data.pop(key, None)
-            return True
+            logger.warning(f"[Cache] Redis get_many failed: {e}")
+            return {}
 
+    def set_many(self, mapping, timeout=None, version=None):
+        if not self._redis_available:
+            return list(mapping.keys())
+        try:
+            return super().set_many(mapping, timeout=timeout, version=version)
+        except Exception as e:
+            logger.warning(f"[Cache] Redis set_many failed: {e}")
+            return list(mapping.keys())
 
-resilient_cache = ResilientCache()
+    def delete_many(self, keys, version=None):
+        if not self._redis_available:
+            return
+        try:
+            return super().delete_many(keys, version=version)
+        except Exception as e:
+            logger.warning(f"[Cache] Redis delete_many failed: {e}")
+
+    def has_key(self, key, version=None):
+        if not self._redis_available:
+            return False
+        try:
+            return super().has_key(key, version=version)
+        except Exception as e:
+            logger.warning(f"[Cache] Redis has_key failed for {key}: {e}")
+            return False
+
+    def incr(self, key, delta=1, version=None):
+        if not self._redis_available:
+            raise ValueError("Key '%s' not found" % key)
+        try:
+            return super().incr(key, delta=delta, version=version)
+        except Exception as e:
+            logger.warning(f"[Cache] Redis incr failed for {key}: {e}")
+            raise ValueError("Key '%s' not found" % key)
+
+    def decr(self, key, delta=1, version=None):
+        if not self._redis_available:
+            raise ValueError("Key '%s' not found" % key)
+        try:
+            return super().decr(key, delta=delta, version=version)
+        except Exception as e:
+            logger.warning(f"[Cache] Redis decr failed for {key}: {e}")
+            raise ValueError("Key '%s' not found" % key)
+
+    async def aget(self, key, default=None, version=None):
+        if not self._redis_available:
+            return default
+        try:
+            return await super().aget(key, default=default, version=version)
+        except Exception as e:
+            logger.warning(f"[Cache] Redis aget failed for {key}: {e}")
+            return default
+
+    async def aset(self, key, value, timeout=None, version=None):
+        if not self._redis_available:
+            return False
+        try:
+            return await super().aset(key, value, timeout=timeout, version=version)
+        except Exception as e:
+            logger.warning(f"[Cache] Redis aset failed for {key}: {e}")
+            return False
+
+    async def adelete(self, key, version=None):
+        if not self._redis_available:
+            return False
+        try:
+            return await super().adelete(key, version=version)
+        except Exception as e:
+            logger.warning(f"[Cache] Redis adelete failed for {key}: {e}")
+            return False
