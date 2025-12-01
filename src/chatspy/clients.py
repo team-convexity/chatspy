@@ -1103,35 +1103,38 @@ class SMSClient:
     @staticmethod
     def format_phone_number(phone_number: str, country_code: str = "NG") -> str:
         """
-        Format phone numbers according to country specifications, with support for extensions.
-        Currently only supports Nigeria (NG).
+        Format phone numbers according to country specifications.
+        Numbers already in international format (starting with +) are passed through as-is.
+        For local numbers, currently only supports Nigeria (NG) formatting.
         """
         cleaned = re.sub(r"(?!^\+)[^\d]", "", str(phone_number))
 
-        if country_code.upper() == "NG":
-            if cleaned.startswith("+234"):
-                formatted = cleaned  # already in international format
+        if cleaned.startswith("+"):
+            if len(cleaned) >= 10:
+                return cleaned
+            raise ValueError(f"Invalid international phone number: {phone_number}")
 
-            elif cleaned.startswith("234"):
+        if country_code.upper() == "NG":
+            if cleaned.startswith("234"):
                 formatted = f"+{cleaned}"
 
             elif cleaned.startswith("0"):
                 formatted = f"+234{cleaned[1:]}"
 
-            else:
-                # for numbers without prefix, we assume they're missing country code
-                if len(cleaned) == 10:
-                    formatted = f"+234{cleaned}"
+            elif len(cleaned) == 10:
+                formatted = f"+234{cleaned}"
 
-                else:
-                    raise ValueError(f"Invalid Nigerian phone number format: {phone_number}")
+            else:
+                raise ValueError(f"Invalid Nigerian phone number format: {phone_number}")
 
             if len(formatted) != 14:
                 raise ValueError(f"Invalid Nigerian phone number length: {phone_number}")
-        else:
-            raise ValueError(f"Unsupported country code: {country_code}. Currently only 'NG' is supported")
 
-        return formatted
+            return formatted
+
+        raise ValueError(
+            f"Unsupported country code: {country_code}. Currently only 'NG' is supported for local numbers"
+        )
 
 
 class TermiClient(SMSClient):
