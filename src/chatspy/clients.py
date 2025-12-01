@@ -199,7 +199,8 @@ class NotificationClient(ServiceClient):
 
 class RedisClient:
     """
-    Base class for Redis Cluster connection
+    Base class for Redis Cluster connection.
+    Gracefully handles connection failures - operations return None/False instead of raising.
     """
 
     def __init__(
@@ -209,6 +210,8 @@ class RedisClient:
         skip_full_coverage_check: bool = True,
         password=None,
         cluster_enabled=False,
+        socket_timeout: float = 2.0,
+        socket_connect_timeout: float = 2.0,
     ):
         """
         Initialize Redis Cluster connection
@@ -216,28 +219,47 @@ class RedisClient:
         :param startup_nodes: list of initial cluster nodes
         :param decode_responses: Convert responses to strings
         :param skip_full_coverage_check: Helps with partial cluster setups
-        :password: password
-        :cluster_enabled: whether we are connecting as a cluster or not
+        :param password: password
+        :param cluster_enabled: whether we are connecting as a cluster or not
+        :param socket_timeout: timeout for socket operations (default 2s)
+        :param socket_connect_timeout: timeout for socket connection (default 2s)
         """
-
-        if cluster_enabled:
-            self.client = RedisCluster(
-                password=password,
-                startup_nodes=startup_nodes,
-                decode_responses=decode_responses,
-                skip_full_coverage_check=skip_full_coverage_check,
-            )
-
-        cluster = startup_nodes[0]
-        self.client = redis.Redis(host=cluster.host, port=cluster.port, password=password, db=0)
+        self.client = None
+        self._available = False
 
         try:
-            self.client.ping()
-            logger.i(f"[Redis] Successfully connected to {cluster.host}")
+            if cluster_enabled:
+                self.client = RedisCluster(
+                    password=password,
+                    startup_nodes=startup_nodes,
+                    decode_responses=decode_responses,
+                    skip_full_coverage_check=skip_full_coverage_check,
+                    socket_timeout=socket_timeout,
+                    socket_connect_timeout=socket_connect_timeout,
+                )
+            else:
+                cluster = startup_nodes[0]
+                self.client = redis.Redis(
+                    host=cluster.host,
+                    port=cluster.port,
+                    password=password,
+                    db=0,
+                    socket_timeout=socket_timeout,
+                    socket_connect_timeout=socket_connect_timeout,
+                )
 
-        except redis.exceptions.ConnectionError as e:
+            self.client.ping()
+            self._available = True
+            logger.i(f"[Redis] Successfully connected to {startup_nodes[0].host}")
+
+        except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as e:
             logger.e(f"[Redis] Cannot establish connection to Redis: {e}")
-            raise
+            self.client = None
+            self._available = False
+
+    @property
+    def available(self) -> bool:
+        return self._available and self.client is not None
 
     def set(self, key: str, value: Union[str, int, float], expire: Optional[int] = None) -> bool:
         """
@@ -248,11 +270,17 @@ class RedisClient:
         :param expire: Optional expiration time in seconds
         :return: Boolean indicating success
         """
+        if not self.available:
+            return False
         try:
             value = json.dumps(value)
             if expire:
                 return self.client.setex(key, expire, value)
-            return self.client.json(key, value)
+            return self.client.set(key, value)
+        except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as e:
+            logger.e(f"[Redis] Connection error setting key {key}: {e}")
+            self._available = False
+            return False
         except Exception as e:
             logger.i(f"Error setting key {key}: {e}")
             return False
@@ -264,8 +292,14 @@ class RedisClient:
         :param key: Redis key to retrieve
         :return: Value or None if key doesn't exist
         """
+        if not self.available:
+            return None
         try:
             return self.client.get(key)
+        except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as e:
+            logger.e(f"[Redis] Connection error getting key {key}: {e}")
+            self._available = False
+            return None
         except Exception as e:
             logger.i(f"Error getting key {key}: {e}")
             return None
@@ -277,8 +311,14 @@ class RedisClient:
         :param key: Key to delete
         :return: Number of keys deleted
         """
+        if not self.available:
+            return 0
         try:
             return self.client.delete(key)
+        except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as e:
+            logger.e(f"[Redis] Connection error deleting key {key}: {e}")
+            self._available = False
+            return 0
         except Exception as e:
             logger.i(f"Error deleting key {key}: {e}")
             return 0
