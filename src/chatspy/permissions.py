@@ -222,7 +222,9 @@ class Permissions(str, Enum):
 
                 # check latest permissions from redis, if not found, fall back to the permissions in the request's header.
                 redis_client: RedisClient = Services.get_client("redis")
-                user_permissions = redis_client.get(f"user:{request.user.id}:permissions")
+                user_permissions = None
+                if redis_client and redis_client.available:
+                    user_permissions = redis_client.get(f"user:{request.user.id}:permissions")
 
                 # if user is admin, allow access
                 token = request.headers.get("Authorization", "").split(" ")[1]
