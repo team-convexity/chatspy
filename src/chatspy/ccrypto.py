@@ -52,6 +52,7 @@ from .exceptions import (
     FallbackErrorHandler,
     ContractParsingError,
     SimulationErrorHandler,
+    UnauthorizedError,
 )
 from .models import IDMapper
 from .services import Service
@@ -224,6 +225,10 @@ class StellarBatchManager:
             except RPCError:
                 raise
 
+            except UnauthorizedError:
+                # Preserve UnauthorizedError for role handling upstream
+                raise
+
             except Exception as e:
                 raise RPCError(f"Transaction failed: {str(e)}")
 
@@ -238,6 +243,12 @@ class StellarBatchManager:
                 "retries": attempt_counter["count"] - 1,
                 "rpc_used": final_rpc,
             }
+
+        except UnauthorizedError:
+            # Preserve UnauthorizedError for role handling upstream
+            final_rpc = attempt_counter["rpc_used"]
+            self.record_rpc_result(final_rpc, "error")
+            raise
 
         except RPCError as e:
             final_rpc = attempt_counter["rpc_used"]
