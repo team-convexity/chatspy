@@ -1214,7 +1214,7 @@ class TermiClient(SMSClient):
         phone: Union[str, list[str]],
         message: str,
         source: str,
-        channel: Literal["dnd", "whatsapp", "generic", "WhatsApp_otp"] = "dnd",
+        channel: Literal["dnd", "whatsapp", "generic"] = "dnd",
         type: str = "plain",
         media_url: Optional[str] = None,
         media_caption: Optional[str] = None,
@@ -1227,14 +1227,25 @@ class TermiClient(SMSClient):
         if isinstance(source, str) and len(source) > 11:
             raise ValueError("Sender ID must be 11 characters or less")
 
-        recipients = [phone] if isinstance(phone, str) else phone
-        payload = {
-            "to": recipients,
-            "type": type,
-            "from": source,
-            "sms": message,
-            "channel": channel,
-        }
+        if channel == "whatsapp":
+            payload = {
+                "to": phone[0] if isinstance(phone, list) else phone,
+                "from": source,
+                "sms": re.search(r"\d+", message).group(0),
+                "type": "plain",
+                "channel": "whatsapp_otp",
+                "api_key": self.api_key,
+            }
+
+        else:
+            recipients = [phone] if isinstance(phone, str) else phone
+            payload = {
+                "to": recipients,
+                "type": type,
+                "from": source,
+                "sms": message,
+                "channel": channel,
+            }
 
         if media_url or media_caption:
             if not (media_url and media_caption):
