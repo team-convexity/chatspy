@@ -155,9 +155,17 @@ class StellarBatchManager:
         project_id: str,
         caller: StellarKeypair,
         batch_num: int = 0,
+        allocation_type: str = "item",
     ) -> Dict[str, Any]:
         """
         Submit batch with automatic retry and RPC rotation.
+
+        Args:
+            allowances: List of (allowee, currency/item_id, amount/quantity, expiry)
+            project_id: The project ID
+            caller: The Stellar keypair for signing
+            batch_num: Batch number for RPC selection
+            allocation_type: "cash" for cash allowances, "item" for item allowances
 
         Returns:
             Dict with: {
@@ -193,11 +201,18 @@ class StellarBatchManager:
                 )
 
             try:
-                result = contract.allocate_item_allowances_batch(
-                    allowances=allowances,
-                    project_id=project_id,
-                    caller=caller,
-                )
+                if allocation_type == "cash":
+                    result = contract.allocate_cash_allowances_batch(
+                        allowances=allowances,
+                        project_id=project_id,
+                        caller=caller,
+                    )
+                else:
+                    result = contract.allocate_item_allowances_batch(
+                        allowances=allowances,
+                        project_id=project_id,
+                        caller=caller,
+                    )
 
                 tx_status = getattr(result, "status", "unknown")
                 if "ERROR" in str(tx_status):
@@ -1467,15 +1482,14 @@ class StellarProjectContract(Contract):
 
     def allocate_cash_allowances_batch(
         self,
+        caller: StellarKeypair,
         project_id: str,
-        caller_secret: str,
         allowances: list[Tuple[str, str, int, Optional[int]]],
     ) -> Dict[str, Any]:
         """Allocate multiple cash allowances in a single transaction."""
         for _, currency, _, _ in allowances:
             self._validate_identifier(currency, "currency")
 
-        caller = StellarKeypair.from_secret(caller_secret)
         allowances_vec = scval.to_vec(
             [
                 scval.to_vec(
