@@ -959,8 +959,8 @@ class Contract:
     def get_item_allowance(self, project_id: str, allowee: str, item_id: str) -> Dict[str, Any]: ...
     def get_all_cash_allowances(self, project_id: str) -> Dict[str, Any]: ...
     def get_all_item_allowances(self, project_id: str) -> Dict[str, Any]: ...
-    def get_total_cash_allowance(self, beneficiary: str, project_ids: list[str]) -> Dict[str, Any]: ...
-    def get_total_item_allowance(self, beneficiary: str, project_ids: list[str]) -> Dict[str, Any]: ...
+    def get_total_cash_allowance(self, beneficiary: str, project_ids: list[str], currencies: list[str]) -> Dict[str, Any]: ...
+    def get_total_item_allowance(self, beneficiary: str, project_ids: list[str], item_ids: list[str]) -> Dict[str, Any]: ...
     def get_roles(self, project_id: str) -> Dict[str, Any]: ...
 
     @staticmethod
@@ -1644,16 +1644,24 @@ class StellarProjectContract(Contract):
         entry = self.server.get_ledger_entry(key)
         return Allowance(amount=entry.data.get("amount", 0), expiry=entry.data.get("expiry"))
 
-    async def get_total_cash_allowance(self, beneficiary: str, caller: StellarKeypair, project_ids: list[str]) -> int:
+    async def get_total_cash_allowance(self, beneficiary: str, caller: StellarKeypair, project_ids: list[str], currencies: list[str]) -> int:
         projects = [scval.to_uint64(IDMapper.to_contract_id(id)) for id in project_ids]
-        args = [scval.to_address(beneficiary), scval.to_vec(projects)]
+        args = [
+            scval.to_address(beneficiary),
+            scval.to_vec(projects),
+            scval.to_vec([scval.to_string(curr) for curr in currencies])
+        ]
         return await self._query(
             "get_total_cash_allowance", args, caller, project_id=project_ids[0], result_type="balance"
         )
 
-    async def get_total_item_allowance(self, beneficiary: str, caller: StellarKeypair, project_ids: list[str]) -> int:
+    async def get_total_item_allowance(self, beneficiary: str, caller: StellarKeypair, project_ids: list[str], item_ids: list[str]) -> int:
         projects = [scval.to_uint64(IDMapper.to_contract_id(id)) for id in project_ids]
-        args = [scval.to_address(beneficiary), scval.to_vec(projects)]
+        args = [
+            scval.to_address(beneficiary),
+            scval.to_vec(projects),
+            scval.to_vec([scval.to_string(item) for item in item_ids])
+        ]
         return await self._query(
             "get_total_item_allowance", args, caller, project_id=project_ids[0], result_type="balance"
         )
