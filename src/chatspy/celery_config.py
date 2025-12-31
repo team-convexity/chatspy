@@ -9,15 +9,9 @@ app = Celery("chats", include="chatspy.tasks")
 class CeleryConfig:
     def __init__(self):
         self.REDIS_URL = os.getenv("REDIS_LOCATION")
-        self.is_cluster = os.getenv("REDIS_CLUSTER_MODE", "").lower() in ("true", "1", "yes")
 
     def get_celery_config(self):
         broker_url = self.REDIS_URL
-        if self.is_cluster and self.REDIS_URL:
-            if self.REDIS_URL.startswith("rediss://"):
-                broker_url = self.REDIS_URL.replace("rediss://", "rediss+cluster://", 1)
-            elif self.REDIS_URL.startswith("redis://"):
-                broker_url = self.REDIS_URL.replace("redis://", "redis+cluster://", 1)
 
         config = {
             # Broker settings
