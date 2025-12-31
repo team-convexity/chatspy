@@ -11,10 +11,15 @@ class CeleryConfig:
         self.REDIS_URL = os.getenv("REDIS_LOCATION")
 
     def get_celery_config(self):
+        import ssl
         return {
             # Broker settings
             "broker_url": self.REDIS_URL,
             "result_backend": self.REDIS_URL,
+            # SSL settings for Redis/MemoryDB
+            "broker_use_ssl": {
+                "ssl_cert_reqs": ssl.CERT_NONE
+            },
             # Task settings
             "task_serializer": "json",
             "accept_content": ["json"],  # Ignore other content
