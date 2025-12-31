@@ -1,5 +1,5 @@
 import os
-
+import ssl
 from celery import Celery
 from kombu import Queue, Exchange
 
@@ -11,15 +11,10 @@ class CeleryConfig:
         self.REDIS_URL = os.getenv("REDIS_LOCATION")
 
     def get_celery_config(self):
-        import ssl
-        ssl_config = {"ssl_cert_reqs": ssl.CERT_NONE}
-        return {
+        config = {
             # Broker settings
             "broker_url": self.REDIS_URL,
             "result_backend": self.REDIS_URL,
-            # SSL settings for Redis/MemoryDB (broker and result backend)
-            "broker_use_ssl": ssl_config,
-            "redis_backend_use_ssl": ssl_config,
             # Task settings
             "task_serializer": "json",
             "accept_content": ["json"],  # Ignore other content
@@ -87,3 +82,10 @@ class CeleryConfig:
             "worker_log_format": "[%(asctime)s: %(levelname)s/%(processName)s] %(message)s",
             "worker_task_log_format": "[%(asctime)s: %(levelname)s/%(processName)s][%(task_name)s(%(task_id)s)] %(message)s",
         }
+
+        if self.REDIS_URL and self.REDIS_URL.startswith("rediss://"):
+            ssl_config = {"ssl_cert_reqs": ssl.CERT_NONE}
+            config["broker_use_ssl"] = ssl_config
+            config["redis_backend_use_ssl"] = ssl_config
+
+        return config
