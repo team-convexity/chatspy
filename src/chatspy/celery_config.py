@@ -9,12 +9,20 @@ app = Celery("chats", include="chatspy.tasks")
 class CeleryConfig:
     def __init__(self):
         self.REDIS_URL = os.getenv("REDIS_LOCATION")
+        self.is_cluster = os.getenv("REDIS_CLUSTER_MODE", "").lower() in ("true", "1", "yes")
 
     def get_celery_config(self):
+        broker_url = self.REDIS_URL
+        if self.is_cluster and self.REDIS_URL:
+            if self.REDIS_URL.startswith("rediss://"):
+                broker_url = self.REDIS_URL.replace("rediss://", "rediss+cluster://", 1)
+            elif self.REDIS_URL.startswith("redis://"):
+                broker_url = self.REDIS_URL.replace("redis://", "redis+cluster://", 1)
+
         config = {
             # Broker settings
-            "broker_url": self.REDIS_URL,
-            "result_backend": self.REDIS_URL,
+            "broker_url": broker_url,
+            "result_backend": broker_url,
             # Task settings
             "task_serializer": "json",
             "accept_content": ["json"],  # Ignore other content
@@ -77,13 +85,13 @@ class CeleryConfig:
             },
             # Beat settings
             "beat_scheduler": "redbeat.RedBeatScheduler",
-            "redbeat_redis_url": self.REDIS_URL,
+            "redbeat_redis_url": broker_url,
             # Logging
             "worker_log_format": "[%(asctime)s: %(levelname)s/%(processName)s] %(message)s",
             "worker_task_log_format": "[%(asctime)s: %(levelname)s/%(processName)s][%(task_name)s(%(task_id)s)] %(message)s",
         }
 
-        if self.REDIS_URL and self.REDIS_URL.startswith("rediss://"):
+        if self.REDIS_URL and "rediss" in self.REDIS_URL:
             ssl_config = {"ssl_cert_reqs": ssl.CERT_NONE}
             config["broker_use_ssl"] = ssl_config
             config["redis_backend_use_ssl"] = ssl_config
