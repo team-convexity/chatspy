@@ -212,6 +212,7 @@ class RedisClient:
         cluster_enabled=False,
         socket_timeout: float = 2.0,
         socket_connect_timeout: float = 2.0,
+        ssl: bool = False,
     ):
         """
         Initialize Redis Cluster connection
@@ -223,6 +224,7 @@ class RedisClient:
         :param cluster_enabled: whether we are connecting as a cluster or not
         :param socket_timeout: timeout for socket operations (default 2s)
         :param socket_connect_timeout: timeout for socket connection (default 2s)
+        :param ssl: Enable TLS/SSL connection (required for AWS MemoryDB)
         """
         self.client = None
         self._available = False
@@ -236,6 +238,7 @@ class RedisClient:
                     skip_full_coverage_check=skip_full_coverage_check,
                     socket_timeout=socket_timeout,
                     socket_connect_timeout=socket_connect_timeout,
+                    ssl=ssl,
                 )
             else:
                 cluster = startup_nodes[0]
@@ -246,6 +249,7 @@ class RedisClient:
                     db=0,
                     socket_timeout=socket_timeout,
                     socket_connect_timeout=socket_connect_timeout,
+                    ssl=ssl,
                 )
 
             self.client.ping()
@@ -632,9 +636,10 @@ class Services:
 
         cls.clients["redis"] = RedisClient(
             startup_nodes=[
-                ClusterNode(os.getenv("REDIS_CLUSTER_A_STRING"), os.getenv("REDIS_CLUSTER_A_PORT", 10397)),
+                ClusterNode(os.getenv("REDIS_CLUSTER_A_STRING"), int(os.getenv("REDIS_CLUSTER_A_PORT", 6379))),
             ],
-            password=os.getenv("REDIS_PASSWORD"),
+            password=os.getenv("REDIS_PASSWORD") or None,
+            ssl=os.getenv("REDIS_SSL", "").lower() in ("true", "1", "yes"),
         )
         cls.clients["kafka"] = KafkaClient(bootstrap_servers=os.getenv("KAFKA_SERVICE_URI"))
         cls.clients["producer"] = cls.clients["kafka"].create_producer(bufferd_producer=bufferd_producer)
