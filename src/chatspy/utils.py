@@ -153,6 +153,10 @@ def is_production():
     return True if "production" in os.getenv("DJANGO_SETTINGS_MODULE") else False
 
 
+def is_development():
+    return True if "development" in os.getenv("DJANGO_SETTINGS_MODULE") else False
+
+
 def get_ip_location(ip_address: str) -> dict | None:
     """
     returns the country code and name for a given IP address using the GeoIP2 database.
