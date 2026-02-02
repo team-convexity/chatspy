@@ -90,7 +90,7 @@ class Resource(Enum):
     VENDOR = "vendor"
     PROJECT = "project"
     ACCOUNT = "account"
-    ADMIN_USER = "admin_users"
+    ORGANIZATION = "organization"
     FIELD_AGENT = "field_agents"
     BENEFICIARY = "beneficiary"
     MARKETPLACE = "marketplace"
@@ -178,6 +178,10 @@ class PermissionMapping:
                 permission_types=[PermissionType.VIEW],
                 resources=[Resource.PROJECT, Resource.BENEFICIARY, Resource.ACCOUNT, Resource.VENDOR],
             ),
+            SystemRole.POWER_USER.value: cls.generate_permissions(
+                permission_types=[PermissionType.VIEW, PermissionType.MANAGE],
+                resources=[Resource.ORGANIZATION, Resource.USERS, Resource.ROLES],
+            ),
         }
 
 
@@ -211,6 +215,51 @@ class Permissions(str, Enum):
 
     MANAGE_ITEMS = f"{PermissionType.MANAGE.value}:{Resource.ITEMS.value}"
     VIEW_ITEMS = f"{PermissionType.VIEW.value}:{Resource.ITEMS.value}"
+
+    MANAGE_ORGANIZATION = f"{PermissionType.MANAGE.value}:{Resource.ORGANIZATION.value}"
+    VIEW_ORGANIZATION = f"{PermissionType.VIEW.value}:{Resource.ORGANIZATION.value}"
+
+    @staticmethod
+    def role_required(*required_roles: "SystemRole | InvitedRole | RegistrationRole"):
+        """
+        Decorator to restrict access to specific roles only.
+        Unlike permission_required, this does NOT bypass for ADMIN_INDIVIDUAL or NGO.
+        Use this for platform-level operations that only power users should access.
+
+        Args:
+            required_roles: Role enums (e.g., SystemRole.POWER_USER)
+        """
+
+        def decorator(func: Callable[..., Any]):
+            @wraps(func)
+            async def wrapper(request, *args, **kwargs):
+                if not hasattr(request, "headers"):
+                    return JsonResponse({"message": "Invalid request object", "detail": ""}, status=400)
+
+                token = request.headers.get("Authorization", "").split(" ")[1]
+                roles_permissions = verify_auth_token(token, verify=False)
+
+                if isinstance(roles_permissions, str):
+                    roles_permissions = json.loads(roles_permissions)
+
+                user_roles = roles_permissions.get("roles", [])
+
+                # Extract string values from role enums
+                required_role_values = [role.value if hasattr(role, "value") else str(role) for role in required_roles]
+
+                # Check if user has any of the required roles
+                if not any(role in user_roles for role in required_role_values):
+                    return JsonResponse(
+                        {"message": "Access denied. Insufficient role privileges.", "detail": ""}, status=403
+                    )
+
+                if asyncio.iscoroutinefunction(func):
+                    return await func(request, *args, **kwargs)
+                return func(request, *args, **kwargs)
+
+            return wrapper
+
+        return decorator
 
     @staticmethod
     def permission_required(*required_permissions, mode: Literal["any", "all"] = "any"):
