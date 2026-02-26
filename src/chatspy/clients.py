@@ -462,8 +462,13 @@ class KafkaClient:
             "bootstrap_servers": bootstrap_servers,
         }
         # write temp file names/dir to a text file for clean up later.
-        with open("/tmp/chats-events-log.txt", "w") as log_file:
-            json.dump(self.temp_files, log_file, indent=4)
+        log_file_path = os.path.join(tempfile.gettempdir(), f"chats-events-log-{os.getpid()}.txt")
+        try:
+            with open(log_file_path, "w") as log_file:
+                json.dump(self.temp_files, log_file, indent=4)
+        except (PermissionError, OSError):
+            # Silently ignore if we can't write the log file (e.g., in containers with restricted /tmp)
+            pass
 
         self._producer = None
         self._consumer = None
