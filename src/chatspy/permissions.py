@@ -182,6 +182,14 @@ class PermissionMapping:
                 permission_types=[PermissionType.VIEW, PermissionType.MANAGE],
                 resources=[Resource.ORGANIZATION, Resource.USERS, Resource.ROLES],
             ),
+            SystemRole.BENEFICIARY.value: cls.generate_permissions(
+                permission_types=[PermissionType.VIEW],
+                resources=[Resource.VENDOR, Resource.PROJECT],
+            ),
+            SystemRole.VENDOR.value: cls.generate_permissions(
+                permission_types=[PermissionType.VIEW],
+                resources=[Resource.VENDOR, Resource.PROJECT],
+            ),
         }
 
 
