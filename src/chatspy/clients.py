@@ -514,29 +514,41 @@ class KafkaClient:
 
     def json_serializer(self, v):
         """
-        serializer for various field types and other objects.
-        """
+        Serializer for various field types and other objects.
 
+        Converts all values to JSON-serializable Python objects first,
+        then serializes the final result to a JSON string once.
+        """
+        return json.dumps(self._to_serializable(v), default=str)
+
+    def _to_serializable(self, v):
+        """
+        Recursively convert a value to a JSON-serializable Python object
+        without double-encoding.
+        """
         match v:
             case datetime():
-                result = v.isoformat()
+                return v.isoformat()
             case ImageField() if v:
-                result = v.url
+                return v.url
             case ImageField():
-                result = None
+                return None
             case timezone():
-                result = str(v)
+                return str(v)
             case models.Model():
-                result = serialize("json", [v])
+                return json.loads(serialize("json", [v]))
             case list() | tuple() if all(isinstance(item, models.Model) for item in v):
-                result = serialize("json", v)
+                return json.loads(serialize("json", v))
             case dict():
-                result = {key: self.json_serializer(value) for key, value in v.items()}
+                return {key: self._to_serializable(value) for key, value in v.items()}
+            case list() | tuple():
+                return [self._to_serializable(item) for item in v]
+            case int() | float() | bool():
+                return v
+            case None:
+                return None
             case _:
-                result = json.dumps(v, default=str)
-
-        result = json.dumps(result, default=str)
-        return result if result is not None else None
+                return str(v) if not isinstance(v, str) else v
 
     def create_producer(self, bufferd_producer: bool = False) -> KafkaProducer | BufferedProducer:
         try:
