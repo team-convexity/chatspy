@@ -128,6 +128,20 @@ async def clean_inner_event_data(string: str):
     )
 
 
+async def parse_event_field(value, default=None):
+    if isinstance(value, (dict, list)):
+        return value
+    if not value:
+        return default if default is not None else {}
+    cleaned = await clean_inner_event_data(value)
+    if isinstance(cleaned, (dict, list)):
+        return cleaned
+    try:
+        return json.loads(cleaned)
+    except (json.JSONDecodeError, TypeError):
+        return default if default is not None else {}
+
+
 def clean_outer_event_data(data: dict):
     """
     cleans the data by removing extra escape characters and nested quotes.
