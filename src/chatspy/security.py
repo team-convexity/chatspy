@@ -31,6 +31,12 @@ class JWTAuth(HttpBearer):
                     else:
                         UserProfile = apps.get_model("core.UserProfile", require_ready=False)
                         user = await UserProfile.objects.aget(auth_user_id=user_id)
+
+                        jwt_user_type = payload.get("user_type")
+                        if jwt_user_type and user.user_type != jwt_user_type:
+                            user.user_type = jwt_user_type
+                            await user.asave(update_fields=["user_type"])
+
                     # try to get cached permissions
                     key = f"user:{user_id}:permissions"
                     redis_client: RedisClient = Services.get_client("redis")

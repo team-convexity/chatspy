@@ -34,6 +34,11 @@ class BaseAuthMiddleware:
                 if "authy" not in os.getenv("DJANGO_SETTINGS_MODULE", ""):
                     UserProfile = apps.get_model("core.UserProfile", require_ready=False)
                     user = UserProfile.objects.get(auth_user_id=ChatsRecord.from_global_id(user_id)[1])
+
+                    jwt_user_type = payload.get("user_type")
+                    if jwt_user_type and user.user_type != jwt_user_type:
+                        user.user_type = jwt_user_type
+                        user.save(update_fields=["user_type"])
                 else:
                     User = apps.get_model("core.User", require_ready=False)
                     user = User.objects.get(id=ChatsRecord.from_global_id(user_id)[1])
