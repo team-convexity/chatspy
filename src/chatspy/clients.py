@@ -1054,32 +1054,27 @@ class KoraPaymentClient(PaymentClient):
         print(payload)
         return self._send_api_request(endpoint=url, payload=payload)
 
-    def query_charge(self, refrence):
-        try:
-            res = self.client.post(self.base_url + "charges/" + refrence)
-            res.raise_for_status()
-            return res.json()
-        except requests.exceptions.RequestException as e:
-            logger.e(f"Query charge failed: {str(e)}")
-            raise PaymentError(str(e), "kora", e, status_code=e.response.status_code if e.response else None)
+    def query_charge(self, reference):
+        endpoint = f"{self.base_url}/charges/{reference}"
+        return self._send_api_request(endpoint=endpoint, method="GET")
 
     def verify_payment(self, reference):
         pass
 
     def single_payout(self, payload):
-        endpoint = f"{self.base_url}/payouts/single"
+        endpoint = f"{self.base_url}/transactions/disburse"
         return self._send_api_request(endpoint=endpoint, payload=payload)
 
     def bulk_payout(self, payload):
-        endpoint = f"{self.base_url}/payouts/bulk"
+        endpoint = f"{self.base_url}/transactions/disburse/bulk"
         return self._send_api_request(endpoint=endpoint, payload=payload)
 
     def query_bulk_payout(self, reference):
-        endpoint = f"{self.base_url}/payouts/bulk/{reference}"
+        endpoint = f"{self.base_url}/transactions/bulk/{reference}"
         return self._send_api_request(endpoint=endpoint, method="GET")
 
     def bulk_payout_details(self, reference):
-        endpoint = f"{self.base_url}/payouts/bulk/{reference}/transactions"
+        endpoint = f"{self.base_url}/transactions/bulk/{reference}/payouts"
         return self._send_api_request(endpoint=endpoint, method="GET")
 
     def verify_payout(self, transaction_reference: str):
