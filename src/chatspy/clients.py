@@ -1000,15 +1000,17 @@ class KoraPaymentClient(PaymentClient):
     """
 
     def __init__(self, **kwargs):
-        self.secret_key = os.getenv("KORA_SECRET_KEY")
-        self.public_key = os.getenv("KORA_PUBLIC_KEY")
         self.client = requests.Session()
-        self.client.headers.update({"Content-Type": "application/json", "Authorization": f"Bearer {self.secret_key}"})
+        self.client.headers.update({"Content-Type": "application/json"})
         self.base_url = "https://api.korapay.com/merchant/api/v1"
-        self.set_auth_header(self.secret_key)
 
-    def set_auth_header(self, key):
-        self.client.headers.update({"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
+    @property
+    def secret_key(self):
+        return os.getenv("KORA_SECRET_KEY")
+
+    @property
+    def public_key(self):
+        return os.getenv("KORA_PUBLIC_KEY")
 
     def _send_api_request(
         self,
@@ -1023,7 +1025,7 @@ class KoraPaymentClient(PaymentClient):
         Send an API request with retry and re-authentication on 403 errors.
         """
         key = self.public_key if use_public_key else self.secret_key
-        self.set_auth_header(key)
+        self.client.headers.update({"Authorization": f"Bearer {key}"})
         for attempt in range(max_retries):
             try:
                 response = self.client.request(method, endpoint, json=payload, **kwargs)
@@ -1032,21 +1034,17 @@ class KoraPaymentClient(PaymentClient):
                 return response.json()
             except requests.exceptions.RequestException as e:
                 status_code = getattr(e.response, "status_code", None)
+                response_body = getattr(e.response, "text", "")
                 if status_code == 403:
-                    logger.warning(
-                        f"Authentication failed for {endpoint} (attempt {attempt + 1}/{max_retries}). Reinitializing client..."
+                    logger.error(f"Authentication failed for {endpoint}. Response: {response_body}")
+                    raise PaymentError(
+                        f"Unable to authenticate with Korapay: {response_body}",
+                        "kora",
+                        e,
+                        status_code=status_code,
                     )
-                    Services.reinitialize(ClientType.KORA_PAYMENT_CLIENT.value)
-                    if attempt == max_retries - 1:
-                        logger.error(f"Max retries reached. Unable to authenticate for {endpoint}.")
-                        raise PaymentError(
-                            "Unable to authenticate with Korapay after multiple attempts",
-                            "kora",
-                            e,
-                            status_code=status_code,
-                        )
                 else:
-                    logger.error(f"HTTP error occurred: {str(e)}")
+                    logger.error(f"HTTP error occurred: {str(e)} | Response: {response_body}")
                     raise PaymentError(str(e), "kora", e, status_code=status_code)
 
     def initialize(self, payload: Dict[str, Any]) -> requests.Response:
