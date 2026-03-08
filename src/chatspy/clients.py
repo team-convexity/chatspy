@@ -1022,10 +1022,17 @@ class KoraPaymentClient(PaymentClient):
         **kwargs,
     ):
         """
-        Send an API request with retry and re-authentication on 403 errors.
+        Send an API request with retry logic.
+
+        Retries on server errors (5xx) with exponential backoff.
+        Connection/timeout errors are only retried for safe (GET) requests;
+        for mutation requests (POST, PUT, PATCH) a timeout is raised
+        immediately because we cannot know whether the server processed it.
         """
         key = self.public_key if use_public_key else self.secret_key
         self.client.headers.update({"Authorization": f"Bearer {key}"})
+        is_safe_method = method.upper() in ("GET", "HEAD", "OPTIONS")
+        last_exc = None
         for attempt in range(max_retries):
             try:
                 response = self.client.request(method, endpoint, json=payload, **kwargs)
@@ -1033,8 +1040,10 @@ class KoraPaymentClient(PaymentClient):
                 logger.info(f"API request to {endpoint} succeeded: {response.json()}")
                 return response.json()
             except requests.exceptions.RequestException as e:
+                last_exc = e
                 status_code = getattr(e.response, "status_code", None)
                 response_body = getattr(e.response, "text", "")
+
                 if status_code == 403:
                     logger.error(f"Authentication failed for {endpoint}. Response: {response_body}")
                     raise PaymentError(
@@ -1043,9 +1052,35 @@ class KoraPaymentClient(PaymentClient):
                         e,
                         status_code=status_code,
                     )
-                else:
-                    logger.error(f"HTTP error occurred: {str(e)} | Response: {response_body}")
+
+                no_response = status_code is None
+                is_server_error = status_code is not None and status_code >= 500
+
+                if no_response and not is_safe_method:
+                    logger.error(
+                        f"Timeout/connection error on mutating {method} {endpoint} — "
+                        f"not retrying (server may have processed it): {str(e)}"
+                    )
                     raise PaymentError(str(e), "kora", e, status_code=status_code)
+
+                is_retryable = no_response or is_server_error
+                if is_retryable and attempt < max_retries - 1:
+                    wait_seconds = min(2 ** (attempt + 1), 30)
+                    logger.warning(
+                        f"Transient error on {endpoint} (attempt {attempt + 1}/{max_retries}), "
+                        f"retrying in {wait_seconds}s: {str(e)}"
+                    )
+                    time.sleep(wait_seconds)
+                    continue
+
+                logger.error(f"HTTP error occurred: {str(e)} | Response: {response_body}")
+                raise PaymentError(str(e), "kora", e, status_code=status_code)
+
+        raise PaymentError(
+            f"Max retries ({max_retries}) exhausted for {endpoint}",
+            "kora",
+            last_exc,
+        )
 
     def initialize(self, payload: Dict[str, Any]) -> requests.Response:
         url = f"{self.base_url}/charges/initialize"
@@ -1077,6 +1112,17 @@ class KoraPaymentClient(PaymentClient):
 
     def verify_payout(self, transaction_reference: str):
         endpoint = f"{self.base_url}/transactions/{transaction_reference}"
+        return self._send_api_request(endpoint=endpoint, method="GET")
+
+    def get_balance(self, currency: str = "NGN") -> Dict[str, Any]:
+        """Get merchant balance for a specific currency."""
+        endpoint = f"{self.base_url}/merchant/balances"
+        result = self._send_api_request(endpoint=endpoint, method="GET", params={"currency": currency})
+        return result
+
+    def get_balances(self) -> Dict[str, Any]:
+        """Get all merchant balances."""
+        endpoint = f"{self.base_url}/merchant/balances"
         return self._send_api_request(endpoint=endpoint, method="GET")
 
     def resolve_account(self, payload) -> Dict[str, Any]:
