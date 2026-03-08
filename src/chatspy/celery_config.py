@@ -59,6 +59,11 @@ class CeleryConfig:
                 "core.models.send_admin_disbursement_notification": {"queue": "projectQ"},
                 "core.models.send_vendor_payment_milestone_notification": {"queue": "projectQ"},
                 "core.models.send_vendor_payment_complete_report": {"queue": "projectQ"},
+                # Bank transfer disbursement tasks
+                "core.models.send_bank_transfer_admin_alert": {"queue": "projectQ"},
+                "core.models.send_bank_transfer_initiated_notifications": {"queue": "projectQ"},
+                "core.models.send_beneficiary_bank_transfer_notification": {"queue": "projectQ"},
+                "core.models.send_bank_transfer_completion_notifications": {"queue": "projectQ"},
                 "core.tasks.retry_failed_transactions": {"queue": "authQ"},
                 "core.tasks.process_unprocessed_donations": {"queue": "projectQ"},
                 "core.tasks.index_organization_wallet_transactions": {"queue": "projectQ"},
