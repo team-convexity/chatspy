@@ -508,6 +508,7 @@ class Asset(Enum):
         amount: str,
         source_secret: str,
         token: Optional[TokenInfo] = None,
+        memo: Optional[str] = None,
     ):
         match chain:
             case Chain.STELLAR:
@@ -523,7 +524,7 @@ class Asset(Enum):
 
                 decrypted_seed = Contract.decrypt_key(sponsor_owner_seed)
                 sponsor_keypair = StellarKeypair.from_mnemonic_phrase(decrypted_seed)
-                transaction = (
+                builder = (
                     TransactionBuilder(
                         source_account=source_account,
                         network_passphrase=Network.PUBLIC_NETWORK_PASSPHRASE
@@ -533,8 +534,10 @@ class Asset(Enum):
                     )
                     .set_timeout(18000)  # 5h
                     .append_payment_op(destination=destination_address, asset=asset, amount=amount)
-                    .build()
                 )
+                if memo:
+                    builder = builder.add_text_memo(memo)
+                transaction = builder.build()
                 transaction.sign(source_keypair)
                 fee_bump_tx = TransactionBuilder.build_fee_bump_transaction(
                     fee_source=sponsor_keypair.public_key,
