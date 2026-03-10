@@ -1116,13 +1116,13 @@ class KoraPaymentClient(PaymentClient):
 
     def get_balance(self, currency: str = "NGN") -> Dict[str, Any]:
         """Get merchant balance for a specific currency."""
-        endpoint = f"{self.base_url}/merchant/balances"
+        endpoint = f"{self.base_url}/balances"
         result = self._send_api_request(endpoint=endpoint, method="GET", params={"currency": currency})
         return result
 
     def get_balances(self) -> Dict[str, Any]:
         """Get all merchant balances."""
-        endpoint = f"{self.base_url}/merchant/balances"
+        endpoint = f"{self.base_url}/balances"
         return self._send_api_request(endpoint=endpoint, method="GET")
 
     def resolve_account(self, payload) -> Dict[str, Any]:
