@@ -55,6 +55,21 @@ class KafkaEvent(Enum):
     UserDeleted = "UserDeleted"
 
 
+DEVELOPER_WEBHOOK_EVENTS = [
+    "project.created",
+    "project.updated",
+    "project.status_changed",
+    "beneficiary.created",
+    "beneficiary.approved",
+    "disbursement.created",
+    "disbursement.completed",
+    "donation.received",
+    "transaction.completed",
+    "cfw.submission.created",
+    "cfw.submission.approved",
+]
+
+
 class ClientType(Enum):
     KAFKA = "kafka"
     PRODUCER = "producer"

@@ -67,6 +67,8 @@ class CeleryConfig:
                 "core.tasks.retry_failed_transactions": {"queue": "authQ"},
                 "core.tasks.process_unprocessed_donations": {"queue": "projectQ"},
                 "core.tasks.index_organization_wallet_transactions": {"queue": "projectQ"},
+                "developer.tasks.deliver_webhook": {"queue": "projectQ"},
+                "developer.tasks.dispatch_webhook_event": {"queue": "projectQ"},
             },
             # Worker settings
             "worker_concurrency": int(os.getenv("CELERY_WORKER_CONCURRENCY", "8")),
