@@ -344,3 +344,22 @@ class Permissions(str, Enum):
 
         parsed_auth_org = ChatsRecord.from_global_id(auth_org)[1]
         return parsed_auth_org == organization_id
+
+
+DEVELOPER_API_SCOPES = [
+    "projects:read",
+    "projects:analytics",
+    "beneficiaries:read",
+    "beneficiaries:write",
+    "wallets:read",
+    "transactions:read",
+    "donors:read",
+    "donations:read",
+    "vendors:read",
+    "inventory:read",
+    "disbursements:read",
+    "feedback:read",
+    "reports:read",
+    "cfw:read",
+    "webhooks:manage",
+]
