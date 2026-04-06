@@ -138,6 +138,9 @@ class NotificationPayload:
     # metadata and routing
     priority: int = 3  # default priority (1-5 scale, 1 being highest)
 
+    # tenant/project identifier for multi-project notification routing
+    project: str = "chats"
+
     body: Optional[str] = None
 
     # template for rendering; Only used for Email channel
@@ -1048,6 +1051,15 @@ class KoraPaymentClient(PaymentClient):
                     logger.error(f"Authentication failed for {endpoint}. Response: {response_body}")
                     raise PaymentError(
                         f"Unable to authenticate with Korapay: {response_body}",
+                        "kora",
+                        e,
+                        status_code=status_code,
+                    )
+
+                if status_code == 400:
+                    logger.error(f"Bad request for {endpoint}. Response: {response_body}")
+                    raise PaymentError(
+                        f"Korapay rejected request: {response_body}",
                         "kora",
                         e,
                         status_code=status_code,
