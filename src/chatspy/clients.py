@@ -1,5 +1,6 @@
 import re
 import os
+import ssl
 import sys
 import time
 import uuid
@@ -470,13 +471,15 @@ class KafkaClient:
         ssl_certfile = self._write_to_temp_file(access_cert, "cert")
         ssl_cafile = self._write_to_temp_file(ca_cert, "ca")
 
-        # common configuration for TLS Authentication
+        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ssl_context.load_cert_chain(certfile=ssl_certfile, keyfile=ssl_keyfile, password=password)
+        ssl_context.load_verify_locations(ssl_cafile)
+        ssl_context.check_hostname = False
+        ssl_context.maximum_version = ssl.TLSVersion.TLSv1_2
+
         self.common_config = {
             "security_protocol": "SSL",
-            "ssl_password": password,
-            "ssl_cafile": ssl_cafile,
-            "ssl_keyfile": ssl_keyfile,
-            "ssl_certfile": ssl_certfile,
+            "ssl_context": ssl_context,
             "bootstrap_servers": bootstrap_servers,
         }
         # write temp file names/dir to a text file for clean up later.
