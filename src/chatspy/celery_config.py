@@ -66,6 +66,7 @@ class CeleryConfig:
                 "core.models.send_bank_transfer_completion_notifications": {"queue": "projectQ"},
                 "core.tasks.retry_failed_transactions": {"queue": "authQ"},
                 "core.tasks.process_unprocessed_donations": {"queue": "projectQ"},
+                "core.tasks.send_donation_notifications": {"queue": "projectQ"},
                 "core.tasks.index_organization_wallet_transactions": {"queue": "projectQ"},
                 "developer.tasks.deliver_webhook": {"queue": "projectQ"},
                 "developer.tasks.dispatch_webhook_event": {"queue": "projectQ"},
