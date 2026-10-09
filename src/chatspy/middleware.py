@@ -17,6 +17,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from chatspy.utils import logger
 from chatspy.activity import get_activity_service
 from chatspy.clients import Services, KafkaEvent
+from chatspy.security import token_allowed_for_request
 
 
 class BaseAuthMiddleware:
@@ -25,9 +26,11 @@ class BaseAuthMiddleware:
         """Async version of get_user_from_token"""
         return self.get_user_from_token(token)
 
-    def get_user_from_token(self, token: str):
+    def get_user_from_token(self, token: str, path: str = ""):
         try:
             payload = jwt.decode(jwt=token, algorithms=["RS256"], key=Secret.get_service_key(service=Service.AUTH))
+            if not token_allowed_for_request(payload, path):
+                return False, ({"success": False, "error": {"message": "Invalid token for this request"}}, 499)
             user_id = payload.get("sub")
             if user_id is not None:
                 # if we are in auth service, user is the real django User model.
@@ -52,9 +55,9 @@ class BaseAuthMiddleware:
             return False, ({"success": False, "data": "User does not exists"}, 499)
         except jwt.DecodeError as e:
             logger.e(
-                f"Cannot decode JWT token ({token}): {e}",
+                f"Cannot decode JWT token: {e}",
                 service=Service.AUTH.value,
-                description=f"Invalid Token: {token}",
+                description="Invalid token",
             )
             return False, ({"success": False, "error": {"message": "Invalid Token"}}, 499)
 
@@ -65,13 +68,13 @@ class BaseAuthMiddleware:
             logger.e(
                 f"Auth UserProfile not found: {e}",
                 service=Service.AUTH.value,
-                description=f"Profile not found: {token}",
+                description="Profile not found for token subject",
             )
             return False, ({"success": False, "error": {"message": "Invalid Token"}}, 499)
 
         except Exception as e:
             logger.e(
-                f"[AuthenticationMiddleware]: {e}", service=Service.AUTH.value, description=f"An error occured: {token}"
+                f"[AuthenticationMiddleware]: {e}", service=Service.AUTH.value, description="Authentication failed"
             )
             return False, ({"success": False, "error": {"message": "An error occured"}}, 500)
 
@@ -93,7 +96,7 @@ class AuthenticationMiddleware(BaseAuthMiddleware):
         if auth_type.lower() != "bearer":
             return Response({"success": False, "error": {"message": "Invalid authorization type"}}, status=499)
 
-        authenticated, user_or_error_response = self.get_user_from_token(token)
+        authenticated, user_or_error_response = self.get_user_from_token(token, request.path)
         if authenticated:
             request.user = user_or_error_response
         else:
@@ -122,9 +125,10 @@ class CorsMiddleware:
         origin = request.headers.get("Origin")
         if origin and self._is_origin_allowed(origin):
             response["Access-Control-Allow-Origin"] = origin
+            response["Access-Control-Allow-Credentials"] = "true"
             response["Access-Control-Allow-Methods"] = "DELETE, GET, OPTIONS, PATCH, POST, PUT"
             response["Access-Control-Allow-Headers"] = (
-                "accept, accept-encoding, authorization, content-type, dnt, origin, user-agent, x-csrftoken, x-requested-with"
+                "accept, accept-encoding, authorization, content-type, dnt, origin, user-agent, x-csrf-token, x-csrftoken, x-refresh-token, x-requested-with"
             )
             response["Vary"] = "Origin"
 
