@@ -96,7 +96,7 @@ class AuthenticationMiddleware(BaseAuthMiddleware):
         if auth_type.lower() != "bearer":
             return Response({"success": False, "error": {"message": "Invalid authorization type"}}, status=499)
 
-        authenticated, user_or_error_response = self.get_user_from_token(token)
+        authenticated, user_or_error_response = self.get_user_from_token(token, request.path)
         if authenticated:
             request.user = user_or_error_response
         else:
