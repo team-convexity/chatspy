@@ -5,13 +5,24 @@ from requests.exceptions import ConnectionError, HTTPError
 from web3 import Web3
 from web3.exceptions import TransactionNotFound, Web3RPCError
 
-from chatspy.evm_rpc import EvmRpcPool, EvmRpcUnavailable
+from chatspy.clients import EvmRpcPool, EvmRpcUnavailable
 
 
 def pool_with(*clients):
     pool = EvmRpcPool([f"https://rpc-{i}.example" for i in range(len(clients))], 84532)
     pool.clients = clients
     return pool
+
+
+def test_rpc_headers_are_scoped_to_one_provider():
+    first = "https://base-rpc.publicnode.com"
+    second = "https://mainnet.base.org"
+    pool = EvmRpcPool(
+        [first, second], 8453,
+        headers_by_url={first: {"Authorization": "Bearer dummy-token"}},
+    )
+    assert pool.clients[0].provider.get_request_kwargs()["headers"] == {"Authorization": "Bearer dummy-token"}
+    assert "Authorization" not in pool.clients[1].provider.get_request_kwargs()["headers"]
 
 
 def test_read_rotates_after_transport_failure_and_ignores_wrong_chain():
