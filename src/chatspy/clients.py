@@ -1464,6 +1464,7 @@ def _transient_rpc_error(error: Web3RPCError) -> bool:
     message = str(error).lower()
     return any(marker in message for marker in (
         "rate limit", "too many requests", "429", "temporarily unavailable", "timeout", "503",
+        "archive requests require a personal token",
     ))
 
 

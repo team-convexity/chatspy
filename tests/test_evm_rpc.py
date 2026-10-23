@@ -65,6 +65,17 @@ def test_rate_limited_provider_fails_over():
     assert pool.call(lambda client: client.eth.get_balance("0xabc")) == 10
 
 
+def test_archive_access_refusal_fails_over():
+    def archive_refused(_):
+        raise Web3RPCError({"code": -32602, "message": "Archive requests require a personal token"})
+
+    pool = pool_with(
+        SimpleNamespace(eth=SimpleNamespace(chain_id=84532, get_transaction_receipt=archive_refused)),
+        SimpleNamespace(eth=SimpleNamespace(chain_id=84532, get_transaction_receipt=lambda _: {"status": 1})),
+    )
+    assert pool.call(lambda client: client.eth.get_transaction_receipt("0xabc")) == {"status": 1}
+
+
 def test_nonce_too_low_only_succeeds_for_the_same_transaction():
     raw = bytes.fromhex("0102")
     tx_hash = Web3.keccak(raw)
